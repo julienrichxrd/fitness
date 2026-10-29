@@ -1,8 +1,9 @@
-// Stockage local (IndexedDB). Étape 1 : uniquement les réglages (collection « meta »).
-// Les séances arriveront à l'étape 2, dans la même base, par une montée de version.
+// Stockage local (IndexedDB), base « fitness-app ».
+// v1 : « meta » (réglages). v2 : + « workouts » (séances) et « sets » (séries), sans toucher aux réglages existants.
 
 const DB_NAME = 'fitness-app';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
+export const STORES = ['meta', 'workouts', 'sets'];
 
 let dbPromise = null;
 
@@ -17,21 +18,34 @@ export function openDb() {
     req.onupgradeneeded = () => {
       const db = req.result;
       if (!db.objectStoreNames.contains('meta')) db.createObjectStore('meta', { keyPath: 'key' });
+      if (!db.objectStoreNames.contains('workouts')) {
+        const w = db.createObjectStore('workouts', { keyPath: 'id' });
+        w.createIndex('date', 'date');
+      }
+      if (!db.objectStoreNames.contains('sets')) {
+        const s = db.createObjectStore('sets', { keyPath: 'id' });
+        s.createIndex('workoutId', 'workoutId');
+      }
     };
-    req.onsuccess = () => resolve(req.result);
+    req.onsuccess = () => {
+      const db = req.result;
+      // Une nouvelle version de l'application ouverte ailleurs : on libère la base.
+      db.onversionchange = () => { db.close(); dbPromise = null; };
+      resolve(db);
+    };
     req.onerror = () => reject(req.error || new Error('Ouverture de la base impossible.'));
-    req.onblocked = () => reject(new Error('Base bloquée par un autre onglet ouvert.'));
+    req.onblocked = () => reject(new Error('Base bloquée par un autre onglet ouvert : fermez-le puis rouvrez l\'application.'));
   });
   dbPromise.catch(() => { dbPromise = null; });
   return dbPromise;
 }
 
-function tx(mode, fn) {
+/** Transaction sur un ou plusieurs magasins ; se résout quand l'écriture est réellement terminée. */
+function tx(stores, mode, fn) {
   return openDb().then((db) => new Promise((resolve, reject) => {
-    const t = db.transaction('meta', mode);
-    const store = t.objectStore('meta');
+    const t = db.transaction(stores, mode);
     let result;
-    Promise.resolve(fn(store)).then((r) => { result = r; });
+    Promise.resolve(fn((name) => t.objectStore(name))).then((r) => { result = r; }, (e) => { try { t.abort(); } catch { /* déjà terminée */ } reject(e); });
     t.oncomplete = () => resolve(result);
     t.onerror = () => reject(t.error);
     t.onabort = () => reject(t.error || new Error('Écriture annulée.'));
@@ -44,11 +58,66 @@ const wrap = (req) => new Promise((resolve, reject) => {
 });
 
 export async function getMeta(key) {
-  return tx('readonly', (s) => wrap(s.get(key))).then((row) => (row ? row.value : undefined));
+  return tx(['meta'], 'readonly', (s) => wrap(s('meta').get(key))).then((row) => (row ? row.value : undefined));
 }
 
 export async function setMeta(key, value) {
-  return tx('readwrite', (s) => { s.put({ key, value, updatedAt: new Date().toISOString() }); });
+  return tx(['meta'], 'readwrite', (s) => { s('meta').put({ key, value, updatedAt: new Date().toISOString() }); });
+}
+
+export async function getAll(store) {
+  return tx([store], 'readonly', (s) => wrap(s(store).getAll()));
+}
+
+export async function putRecord(store, record) {
+  return tx([store], 'readwrite', (s) => { s(store).put(record); });
+}
+
+/** Écrit une série et met à jour sa séance dans la même transaction (tout ou rien). */
+export async function saveSetAndWorkout(set, workout) {
+  return tx(['sets', 'workouts'], 'readwrite', (s) => {
+    s('sets').put(set);
+    s('workouts').put(workout);
+  });
+}
+
+export async function deleteSet(id, workout) {
+  return tx(['sets', 'workouts'], 'readwrite', (s) => {
+    s('sets').delete(id);
+    if (workout) s('workouts').put(workout);
+  });
+}
+
+/** Supprime une séance et toutes ses séries. */
+export async function deleteWorkout(id) {
+  return tx(['sets', 'workouts'], 'readwrite', async (s) => {
+    const keys = await wrap(s('sets').index('workoutId').getAllKeys(id));
+    keys.forEach((k) => s('sets').delete(k));
+    s('workouts').delete(id);
+  });
+}
+
+export async function readEverything() {
+  return tx(STORES, 'readonly', async (s) => {
+    const [meta, workouts, sets] = await Promise.all(STORES.map((n) => wrap(s(n).getAll())));
+    return { meta, workouts, sets };
+  });
+}
+
+/**
+ * Remplace toutes les séances, séries et réglages exportables, en une seule transaction :
+ * en cas d'erreur, rien n'est modifié. keepMeta : clés de réglages à ne jamais effacer.
+ */
+export async function replaceAll({ workouts, sets, meta }, { keepMeta = [] } = {}) {
+  return tx(STORES, 'readwrite', async (s) => {
+    s('workouts').clear();
+    s('sets').clear();
+    const metaKeys = await wrap(s('meta').getAllKeys());
+    metaKeys.filter((k) => !keepMeta.includes(k)).forEach((k) => s('meta').delete(k));
+    workouts.forEach((w) => s('workouts').put(w));
+    sets.forEach((x) => s('sets').put(x));
+    meta.filter((m) => !keepMeta.includes(m.key)).forEach((m) => s('meta').put(m));
+  });
 }
 
 /** Écrit puis relit une valeur témoin : prouve que le stockage fonctionne vraiment. */
