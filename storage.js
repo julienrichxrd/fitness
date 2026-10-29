@@ -1,9 +1,11 @@
 // Stockage local (IndexedDB), base « fitness-app ».
-// v1 : « meta » (réglages). v2 : + « workouts » (séances) et « sets » (séries), sans toucher aux réglages existants.
+// v1 : « meta » (réglages). v2 : + « workouts » (séances) et « sets » (séries).
+// v3 : + « entries » (journal : pesées, mensurations, ressenti, repas, course, natation, mobilité, bilans)
+//      et « photos » (images de suivi, gardées uniquement sur l'appareil). Chaque montée garde les données existantes.
 
 const DB_NAME = 'fitness-app';
-const DB_VERSION = 2;
-export const STORES = ['meta', 'workouts', 'sets'];
+const DB_VERSION = 3;
+export const STORES = ['meta', 'workouts', 'sets', 'entries'];
 
 let dbPromise = null;
 
@@ -25,6 +27,15 @@ export function openDb() {
       if (!db.objectStoreNames.contains('sets')) {
         const s = db.createObjectStore('sets', { keyPath: 'id' });
         s.createIndex('workoutId', 'workoutId');
+      }
+      if (!db.objectStoreNames.contains('entries')) {
+        const e = db.createObjectStore('entries', { keyPath: 'id' });
+        e.createIndex('kind', 'kind');
+        e.createIndex('date', 'date');
+      }
+      if (!db.objectStoreNames.contains('photos')) {
+        const p = db.createObjectStore('photos', { keyPath: 'id' });
+        p.createIndex('date', 'date');
       }
     };
     req.onsuccess = () => {
@@ -97,10 +108,15 @@ export async function deleteWorkout(id) {
   });
 }
 
-export async function readEverything() {
-  return tx(STORES, 'readonly', async (s) => {
-    const [meta, workouts, sets] = await Promise.all(STORES.map((n) => wrap(s(n).getAll())));
-    return { meta, workouts, sets };
+export async function deleteRecord(store, id) {
+  return tx([store], 'readwrite', (s) => { s(store).delete(id); });
+}
+
+export async function readEverything({ withPhotos = false } = {}) {
+  const names = withPhotos ? [...STORES, 'photos'] : STORES;
+  return tx(names, 'readonly', async (s) => {
+    const [meta, workouts, sets, entries, photos] = await Promise.all(names.map((n) => wrap(s(n).getAll())));
+    return { meta, workouts, sets, entries, ...(withPhotos ? { photos } : {}) };
   });
 }
 
@@ -108,15 +124,22 @@ export async function readEverything() {
  * Remplace toutes les séances, séries et réglages exportables, en une seule transaction :
  * en cas d'erreur, rien n'est modifié. keepMeta : clés de réglages à ne jamais effacer.
  */
-export async function replaceAll({ workouts, sets, meta }, { keepMeta = [] } = {}) {
-  return tx(STORES, 'readwrite', async (s) => {
+export async function replaceAll({ workouts, sets, meta, entries = [], photos = null }, { keepMeta = [] } = {}) {
+  return tx([...STORES, 'photos'], 'readwrite', async (s) => {
     s('workouts').clear();
     s('sets').clear();
+    s('entries').clear();
     const metaKeys = await wrap(s('meta').getAllKeys());
     metaKeys.filter((k) => !keepMeta.includes(k)).forEach((k) => s('meta').delete(k));
     workouts.forEach((w) => s('workouts').put(w));
     sets.forEach((x) => s('sets').put(x));
+    entries.forEach((x) => s('entries').put(x));
     meta.filter((m) => !keepMeta.includes(m.key)).forEach((m) => s('meta').put(m));
+    // Photos : remplacées seulement si la sauvegarde en contient ; sinon celles de l'appareil sont gardées.
+    if (photos) {
+      s('photos').clear();
+      photos.forEach((p) => s('photos').put(p));
+    }
   });
 }
 

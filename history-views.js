@@ -1,30 +1,68 @@
-// Historique des séances et progrès par exercice.
+// Journal : toutes les activités et mesures, de la plus récente à la plus ancienne ; détail d'une séance
+// avec correction des séries.
 import { esc, exName, shortName } from './views.js';
-import { formatDateFr } from './dates.js';
+import { formatDateFr, mondayOf, addDays } from './dates.js';
 import { setsOf, weekForDate, workoutPlan } from './workout.js';
-import { bestSet, isStagnating, fmtKg } from './suggest.js';
+import { icon, nf, nf0 } from './ui.js';
 import { setTxt } from './workout-views.js';
+import { fmtDuration, fmtPace, paceSecPerKm, paceSecPer100 } from './endurance.js';
 
 const minutes = (w) => (w.endedAt ? Math.max(1, Math.round((Date.parse(w.endedAt) - Date.parse(w.startedAt)) / 60000)) : null);
 
-export function renderHistory(state) {
+const FILTERS = [
+  { id: 'all', label: 'Tout' },
+  { id: 'lift', label: 'Muscu' },
+  { id: 'endurance', label: 'Endurance' },
+  { id: 'body', label: 'Corps' },
+];
+
+/** Éléments du journal, normalisés pour l'affichage. */
+export function journalItems(state) {
   const { program } = state;
-  const list = (state.workouts || []).filter((w) => w.status !== 'in-progress')
-    .sort((a, b) => (b.date + b.startedAt).localeCompare(a.date + a.startedAt));
-  if (!list.length) {
-    return `<header class="page-head"><h1>Historique</h1></header>
-      <div class="empty">Aucune séance enregistrée pour l'instant.<br>Vos séances apparaîtront ici dès la première terminée.</div>`;
+  const items = [];
+  (state.workouts || []).filter((w) => w.status !== 'in-progress').forEach((w) => {
+    const s = program.sessions.find((x) => x.id === w.sessionId);
+    const n = setsOf(state.sets || [], w.id).length;
+    items.push({
+      date: w.date, at: w.startedAt, group: 'lift', cls: 'lift', ic: 'lift', action: 'open-workout', id: w.id,
+      title: `Séance ${w.sessionId}${s ? `, ${shortName(s).replace(/, \w+$/, '').toLowerCase()}` : ''}`,
+      sub: [`${n} séries`, minutes(w) ? `${minutes(w)} min` : null, w.difficulty ? `difficulté ${w.difficulty}/10` : null, w.status === 'abandoned' ? 'abandonnée' : null, w.backfill ? 'saisie après coup' : null].filter(Boolean).join(', '),
+    });
+  });
+  (state.entries || []).forEach((e) => {
+    const base = { date: e.date, at: e.createdAt || '', id: e.id, action: 'edit-entry' };
+    if (e.kind === 'run') items.push({ ...base, group: 'endurance', cls: 'run', ic: 'run', title: 'Course', sub: [fmtDuration(e.durationSec), e.distanceM ? `${nf(e.distanceM / 1000, 2)} km` : null, e.distanceM && e.durationSec ? `${fmtPace(paceSecPerKm(e.durationSec, e.distanceM / 1000))} /km` : null, e.avgHr ? `${e.avgHr} bpm` : null].filter(Boolean).join(', ') });
+    if (e.kind === 'swim') items.push({ ...base, group: 'endurance', cls: 'swim', ic: 'swim', title: 'Natation', sub: [e.distanceM ? `${nf0(e.distanceM)} m` : null, fmtDuration(e.durationSec), e.test400Sec ? `400 m en ${fmtDuration(e.test400Sec)}` : null].filter(Boolean).join(', ') });
+    if (e.kind === 'mobility') items.push({ ...base, group: 'endurance', cls: 'mob', ic: 'mobility', title: `Mobilité ${e.variant || ''}`, sub: e.minutes ? `${e.minutes} min` : 'Faite' });
+    if (e.kind === 'weight') items.push({ ...base, group: 'body', cls: 'body', ic: 'scale', title: 'Pesée', sub: `${nf(e.kg)} kg` });
+    if (e.kind === 'measure') items.push({ ...base, group: 'body', cls: 'body', ic: 'body', title: 'Mensurations', sub: [['waist', 'taille'], ['chest', 'poitrine'], ['arm', 'bras'], ['thigh', 'cuisse']].filter(([k]) => typeof e[k] === 'number').map(([k, l]) => `${l} ${nf(e[k])}`).join(', ') });
+    if (e.kind === 'checkin') items.push({ ...base, group: 'body', cls: 'body', ic: 'moon', title: 'Ressenti du matin', sub: [typeof e.sleepH === 'number' ? `${nf(e.sleepH)} h de sommeil` : null, e.fatigue ? `fatigue ${e.fatigue}/5` : null, e.pain ? 'douleur' : null].filter(Boolean).join(', ') });
+    if (e.kind === 'photo-meta') items.push({ ...base, group: 'body', cls: 'body', ic: 'camera', title: 'Photo de suivi', sub: { face: 'Face', profil: 'Profil', dos: 'Dos' }[e.pose] || '', action: 'open-photos' });
+  });
+  return items.sort((a, b) => b.date.localeCompare(a.date) || b.at.localeCompare(a.at));
+}
+
+export function renderJournal(state) {
+  const filter = state.journalFilter || 'all';
+  // Le ressenti quotidien n'apparaît que dans « Corps », pour garder « Tout » lisible.
+  const items = journalItems(state).filter((i) => (filter === 'all' ? i.ic !== 'moon' : i.group === filter));
+  const head = `<header class="page-head row-head"><div><h1 class="display">Journal</h1></div><button class="btn small" data-action="sheet" data-value="add">${icon('plus')} Ajouter</button></header>
+    <div class="seg" role="group" aria-label="Filtre">${FILTERS.map((f) => `<button class="chip${f.id === filter ? ' on' : ''}" data-action="journal-filter" data-value="${f.id}">${esc(f.label)}</button>`).join('')}</div>`;
+  if (!items.length) {
+    return `${head}<div class="empty">${filter === 'all' ? 'Rien pour l\'instant. Vos séances, courses, nages, pesées et mesures apparaîtront ici.' : 'Rien dans cette catégorie pour l\'instant.'}
+      <button class="btn quiet" data-action="sheet" data-value="add">${icon('plus')} Ajouter quelque chose</button></div>`;
   }
-  return `<header class="page-head"><h1>Historique</h1></header>
-    <ul class="hist">${list.map((w) => {
-      const s = program.sessions.find((x) => x.id === w.sessionId);
-      const n = setsOf(state.sets || [], w.id).length;
-      const meta = [`${n} séries`, minutes(w) ? `${minutes(w)} min` : null, w.fatigue ? `fatigue ${w.fatigue}/5` : null, w.difficulty ? `difficulté ${w.difficulty}/10` : null].filter(Boolean).join(' · ');
-      return `<li><button class="hist-item" data-action="open-workout" data-id="${esc(w.id)}">
-        <span class="hero-letter small">${esc(w.sessionId)}</span>
-        <span class="hist-main"><span class="hist-date">${esc(formatDateFr(w.date))}${w.status === 'abandoned' ? ' · abandonnée' : ''}</span><span class="hist-name">${esc(s ? shortName(s) : w.sessionId)} · S${weekForDate(program, w.date)}</span><span class="muted small">${esc(meta)}</span></span>
-        <span class="chev">›</span></button></li>`;
-    }).join('')}</ul>`;
+  // Regroupement par semaine (lundi).
+  const weeks = new Map();
+  items.forEach((i) => { const k = mondayOf(i.date); if (!weeks.has(k)) weeks.set(k, []); weeks.get(k).push(i); });
+  return `${head}${[...weeks.entries()].map(([monday, list]) => `
+    <h3 class="section">Semaine du ${esc(formatDateFr(monday, { weekday: false }))} au ${esc(formatDateFr(addDays(monday, 6), { weekday: false }))}</h3>
+    <div class="group">${list.map((i) => `
+      <button class="row" data-action="${i.action}" data-id="${esc(i.id)}">
+        <span class="row-ic ${i.cls}">${icon(i.ic)}</span>
+        <span class="row-main"><b>${esc(i.title)}</b><span>${esc(formatDateFr(i.date, { weekday: true }))}${i.sub ? `, ${esc(i.sub)}` : ''}</span></span>
+        <span class="row-end">${icon('chevron')}</span>
+      </button>`).join('')}</div>`).join('')}`;
 }
 
 export function renderWorkoutDetail(state) {
@@ -33,74 +71,21 @@ export function renderWorkoutDetail(state) {
   if (!w) return '<div class="empty">Séance introuvable.</div>';
   const s = program.sessions.find((x) => x.id === w.sessionId);
   const sets = setsOf(state.sets || [], w.id);
-  const plan = workoutPlan(program, w);
+  const plan = workoutPlan(program, w, (state.settings || {}).increments);
   const blocks = plan.map((x) => {
     const mine = sets.filter((y) => y.slotId === x.slotId);
-    if (!mine.length) return `<li class="det"><div class="det-head"><span class="lbl">${esc(x.label)}</span><span class="nm">${esc(exName(lib, x.exercise))}</span></div><div class="muted small">Non fait</div></li>`;
-    const names = [...new Set(mine.map((y) => y.exercise))].map((id) => exName(lib, id)).join(' puis ');
-    return `<li class="det"><div class="det-head"><span class="lbl">${esc(x.label)}</span><span class="nm">${esc(names)}</span></div><div class="last-sets">${mine.map((y) => `<span>${esc(setTxt(y))}</span>`).join('')}</div></li>`;
+    const names = mine.length ? [...new Set(mine.map((y) => y.exercise))].map((id) => exName(lib, id)).join(' puis ') : exName(lib, x.exercise);
+    return `<li class="det"><div class="det-head"><span class="lbl">${esc(x.label)}</span><span class="nm">${esc(names)}</span></div>
+      ${mine.length ? `<div class="set-chips">${mine.map((y) => `<button class="set-chip" data-action="edit-set" data-id="${esc(y.id)}">${esc(setTxt(y))}</button>`).join('')}</div>` : '<div class="muted small">Non fait</div>'}</li>`;
   }).join('');
   return `
-    <header class="page-head with-back"><button class="back" data-action="go" data-tab="history">‹ Historique</button><p class="kicker">${esc(formatDateFr(w.date, { year: true }))} · S${weekForDate(program, w.date)}</p><h1>Séance ${esc(w.sessionId)} — ${esc(s ? shortName(s) : '')}</h1></header>
-    <div class="pills">${[`${sets.length} séries`, minutes(w) ? `${minutes(w)} min` : null, w.fatigue ? `Fatigue ${w.fatigue}/5` : null, w.difficulty ? `Difficulté ${w.difficulty}/10` : null, w.status === 'abandoned' ? 'Abandonnée' : null].filter(Boolean).map((t) => `<span class="pill">${esc(t)}</span>`).join('')}</div>
+    <header class="page-head with-back"><button class="back" data-action="back">${icon('back')} Journal</button><p class="kicker">${esc(formatDateFr(w.date, { year: true }))}, semaine ${weekForDate(program, w.date)} du programme</p><h1 class="display">Séance ${esc(w.sessionId)}</h1><p class="muted">${esc(s ? shortName(s) : '')}</p></header>
+    <div class="facts">${[`<span><b>${sets.length}</b> séries</span>`, minutes(w) && !w.backfill ? `<span><b>${minutes(w)}</b> min</span>` : '', w.fatigue ? `<span>fatigue <b>${w.fatigue}</b>/5</span>` : '', w.difficulty ? `<span>difficulté <b>${w.difficulty}</b>/10</span>` : ''].join('')}</div>
+    ${w.status === 'abandoned' ? '<div class="notice warn">Séance abandonnée : elle ne compte pas pour les suggestions.</div>' : ''}
     ${w.note ? `<div class="card"><div class="card-kicker">Note</div><p>${esc(w.note)}</p></div>` : ''}
+    <p class="muted small">Touchez une série pour la corriger ou la supprimer.</p>
     <ol class="details">${blocks}</ol>
-    <button class="btn ghost danger-text" data-action="delete-workout" data-id="${esc(w.id)}">Supprimer cette séance</button>`;
+    <button class="btn ghost danger-text" data-action="delete-workout" data-id="${esc(w.id)}">${icon('trash')} Supprimer cette séance</button>`;
 }
 
-/** Petite courbe de la meilleure charge par séance. */
-function sparkline(values) {
-  if (values.length < 2) return '';
-  const w = 120; const h = 36; const pad = 4;
-  const lo = Math.min(...values); const hi = Math.max(...values);
-  const span = hi - lo || 1;
-  const pts = values.map((v, i) => [pad + (i * (w - 2 * pad)) / (values.length - 1), h - pad - ((v - lo) / span) * (h - 2 * pad)]);
-  const d = pts.map((p, i) => `${i ? 'L' : 'M'}${p[0].toFixed(1)} ${p[1].toFixed(1)}`).join(' ');
-  const last = pts[pts.length - 1];
-  return `<svg class="spark" viewBox="0 0 ${w} ${h}" aria-hidden="true"><path d="${d}"/><circle cx="${last[0].toFixed(1)}" cy="${last[1].toFixed(1)}" r="3"/></svg>`;
-}
-
-/** Progrès par exercice : meilleure série de chaque séance, de la plus ancienne à la plus récente. */
-export function exerciseProgress(state) {
-  const workouts = new Map((state.workouts || []).filter((w) => w.status === 'done').map((w) => [w.id, w]));
-  const byEx = new Map();
-  for (const s of state.sets || []) {
-    const w = workouts.get(s.workoutId);
-    if (!w || s.reps === undefined) continue;
-    if (!byEx.has(s.exercise)) byEx.set(s.exercise, new Map());
-    const m = byEx.get(s.exercise);
-    if (!m.has(w.id)) m.set(w.id, { date: w.date, startedAt: w.startedAt, sets: [] });
-    m.get(w.id).sets.push(s);
-  }
-  return [...byEx.entries()].map(([exercise, m]) => {
-    const sessions = [...m.values()].sort((a, b) => (a.date + a.startedAt).localeCompare(b.date + b.startedAt)).map((x) => ({ ...x, best: bestSet(x.sets) }));
-    return { exercise, sessions, stagnation: isStagnating([...sessions].reverse()) };
-  });
-}
-
-export function renderProgress(state) {
-  const { lib } = state;
-  const rows = exerciseProgress(state);
-  if (!rows.length) {
-    return `<header class="page-head"><h1>Progrès</h1></header>
-      <div class="empty">Les progrès par exercice apparaîtront ici après votre première séance enregistrée.</div>`;
-  }
-  return `<header class="page-head"><h1>Progrès</h1><p class="muted">Meilleure série de chaque séance (charge la plus haute, puis le plus de répétitions).</p></header>
-    <ul class="prog">${rows.map((r) => {
-      const first = r.sessions[0].best;
-      const last = r.sessions[r.sessions.length - 1].best;
-      const dKg = (last.loadKg || 0) - (first.loadKg || 0);
-      const dReps = last.reps - first.reps;
-      const delta = r.sessions.length < 2 ? 'première séance' : dKg ? `${dKg > 0 ? '+' : ''}${fmtKg(dKg)} kg` : dReps ? `${dReps > 0 ? '+' : ''}${dReps} rép.` : 'stable';
-      const up = r.sessions.length > 1 && (dKg > 0 || (!dKg && dReps > 0));
-      return `<li><details class="prog-item"><summary>
-        <span class="prog-main"><span class="nm">${esc(exName(lib, r.exercise))}</span><span class="muted small">${esc(setTxt(last))} · ${r.sessions.length} séance${r.sessions.length > 1 ? 's' : ''}</span></span>
-        ${sparkline(r.sessions.map((x) => (x.best.loadKg || 0) * 100 + x.best.reps))}
-        <span class="delta${up ? ' up' : ''}">${esc(delta)}</span>
-        ${r.stagnation ? '<span class="pill warn">Stagnation</span>' : ''}
-      </summary>
-      <table class="prog-table"><thead><tr><th>Date</th><th>Meilleure série</th><th>Séries</th></tr></thead><tbody>
-        ${[...r.sessions].reverse().map((x) => `<tr><td>${esc(formatDateFr(x.date, { weekday: false }))}</td><td>${esc(setTxt(x.best))}</td><td>${x.sets.length}</td></tr>`).join('')}
-      </tbody></table></details></li>`;
-    }).join('')}</ul>`;
-}
+export { minutes, paceSecPer100 };

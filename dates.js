@@ -51,11 +51,17 @@ export const dayFr = (key) => DAY_FR[key];
 export function cycleInfo(program, iso) {
   const start = toDayNumber(program.startDate);
   const day = toDayNumber(iso);
-  const end = start + program.weeks * 7 - 1;
-  const base = { startDate: program.startDate, endDate: fromDayNumber(end), dayKey: dayKey(iso) };
-  if (day < start) return { ...base, status: 'before', daysUntilStart: start - day, week: null };
-  if (day > end) return { ...base, status: 'after', daysSinceEnd: day - end, week: null };
-  return { ...base, status: 'during', week: Math.floor((day - start) / 7) + 1, dayOfCycle: day - start + 1 };
+  // Calendrier effectif (bilans de semaine : semaine maintenue, décharge) : program.calendar,
+  // liste des semaines réelles [{ week, deload }]. Sans calendrier : une semaine du programme par semaine réelle.
+  const cal = Array.isArray(program.calendar) && program.calendar.length ? program.calendar : null;
+  const totalWeeks = cal ? cal.length : program.weeks;
+  const end = start + totalWeeks * 7 - 1;
+  const base = { startDate: program.startDate, endDate: fromDayNumber(end), dayKey: dayKey(iso), totalWeeks };
+  if (day < start) return { ...base, status: 'before', daysUntilStart: start - day, week: null, calWeek: null, deload: false };
+  if (day > end) return { ...base, status: 'after', daysSinceEnd: day - end, week: null, calWeek: null, deload: false };
+  const calWeek = Math.floor((day - start) / 7) + 1;
+  const entry = cal ? cal[calWeek - 1] : { week: calWeek, deload: false };
+  return { ...base, status: 'during', calWeek, week: entry.week, deload: !!entry.deload, dayOfCycle: day - start + 1, weekStart: fromDayNumber(start + (calWeek - 1) * 7) };
 }
 
 /** Date réelle de la séance d'un jour donné, pour une semaine donnée du cycle. */
@@ -63,6 +69,9 @@ export function sessionDate(program, week, dayKeyName) {
   const offset = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'].indexOf(dayKeyName);
   return addDays(program.startDate, (week - 1) * 7 + offset);
 }
+
+/** Date d'un jour donné dans la semaine réelle n (calendrier effectif). */
+export const calDate = (program, calWeek, dayKeyName) => sessionDate(program, calWeek, dayKeyName);
 
 /**
  * Vérifie une nouvelle date de début proposée par l'utilisateur.

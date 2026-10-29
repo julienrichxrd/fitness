@@ -16,12 +16,18 @@ export function weekForDate(program, date) {
   return info.status === 'before' ? 1 : program.weeks;
 }
 
+/** Semaine de décharge décidée au bilan (calendrier effectif). */
+export function deloadForDate(program, date) {
+  const info = cycleInfo(program, date);
+  return info.status === 'during' && !!info.deload;
+}
+
 export function rawSlot(program, sessionId, slotId) {
   return program.sessions.find((s) => s.id === sessionId).slots.find((x) => x.id === slotId);
 }
 
-export function createWorkout(program, sessionId, { date, now = new Date().toISOString(), fatigue = null } = {}) {
-  const plan = resolveSession(program, sessionId, weekForDate(program, date));
+export function createWorkout(program, sessionId, { date, now = new Date().toISOString(), fatigue = null, backfill = false } = {}) {
+  const plan = resolveSession(program, sessionId, weekForDate(program, date), { deload: deloadForDate(program, date) });
   return {
     id: newId('w'),
     programId: program.id,
@@ -36,6 +42,7 @@ export function createWorkout(program, sessionId, { date, now = new Date().toISO
     note: '',
     swaps: {},
     currentSlot: plan[0].slotId,
+    backfill,
     restEndsAt: null,
     restTotalSec: null,
     createdAt: now,
@@ -47,13 +54,16 @@ export function createWorkout(program, sessionId, { date, now = new Date().toISO
  * Plan de la séance, avec les remplacements choisis :
  * swaps[slotId] = { exercise, kind: 'alternative' | 'fallback', fromSet } (repli : seulement les séries restantes).
  */
-export function workoutPlan(program, workout) {
+export function workoutPlan(program, workout, increments = null) {
   const week = weekForDate(program, workout.date);
-  return resolveSession(program, workout.sessionId, week).map((x) => {
+  const deload = deloadForDate(program, workout.date);
+  return resolveSession(program, workout.sessionId, week, { deload }).map((x) => {
     const raw = rawSlot(program, workout.sessionId, x.slotId);
     const sw = workout.swaps && workout.swaps[x.slotId];
     const extra = (workout.extraSets && workout.extraSets[x.slotId]) || 0;
-    const item = { ...x, sets: x.sets + extra, plannedSets: x.sets, planned: x.exercise, increment: raw.increment, raw, week };
+    const override = increments && increments[x.slotId];
+    const increment = override && raw.increment && raw.increment.type !== 'none' ? { ...raw.increment, ...(raw.increment.type === 'bodyweight' ? { loadStepKg: override } : { stepKg: override }) } : raw.increment;
+    const item = { ...x, sets: x.sets + extra, plannedSets: x.sets, planned: x.exercise, increment, raw, week, deload };
     if (sw) {
       item.exercise = sw.exercise;
       item.swap = sw;
@@ -120,8 +130,8 @@ export function restLeft(workout, nowMs = Date.now()) {
 }
 
 /** Séances terminées d'une semaine du cycle. */
-export function weekWorkouts(program, workouts, week) {
-  const start = toDayNumber(addDays(program.startDate, (week - 1) * 7));
+export function weekWorkouts(program, workouts, calWeek) {
+  const start = toDayNumber(addDays(program.startDate, (calWeek - 1) * 7));
   return workouts.filter((w) => w.status === 'done' && toDayNumber(w.date) >= start && toDayNumber(w.date) <= start + 6);
 }
 
@@ -133,11 +143,12 @@ export function nextSessionToDo(program, workouts, today) {
   const info = cycleInfo(program, today);
   if (info.status === 'after') return null;
   if (info.status === 'before') return { sessionId: program.sessionOrder[0], week: 1, trial: true };
-  const done = new Set(weekWorkouts(program, workouts, info.week).map((w) => w.sessionId));
+  const done = new Set(weekWorkouts(program, workouts, info.calWeek).map((w) => w.sessionId));
   const todays = program.schedule.find((s) => s.day === info.dayKey && s.session);
-  if (todays && !done.has(todays.session)) return { sessionId: todays.session, week: info.week, scheduledToday: true };
+  const base = { week: info.week, calWeek: info.calWeek, deload: info.deload };
+  if (todays && !done.has(todays.session)) return { ...base, sessionId: todays.session, scheduledToday: true };
   const missing = program.sessionOrder.find((id) => !done.has(id));
-  return missing ? { sessionId: missing, week: info.week, late: true } : null;
+  return missing ? { ...base, sessionId: missing, late: true } : null;
 }
 
 /** Séance B la veille de la course (samedi) : avertissement du programme. */
@@ -169,7 +180,7 @@ export function slotHistory(workouts, sets, { slotId, exercise, excludeWorkoutId
 /** Suggestion pour un élément du plan, à partir de l'historique enregistré. */
 export function suggestionFor(item, workouts, sets, workout) {
   const history = slotHistory(workouts, sets, { slotId: item.slotId, exercise: item.exercise, excludeWorkoutId: workout ? workout.id : null });
-  return { history, suggestion: suggest({ item, increment: item.increment, history, fatigue: workout ? workout.fatigue : null }) };
+  return { history, suggestion: suggest({ item, increment: item.increment, history, fatigue: workout ? workout.fatigue : null, deload: !!item.deload }) };
 }
 
 /** Valeurs pré-remplies de la prochaine série. */

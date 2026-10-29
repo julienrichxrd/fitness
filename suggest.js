@@ -61,7 +61,7 @@ export function isStagnating(history) {
  * fatigue : fatigue déclarée aujourd'hui (1 à 5) ou null.
  * Retourne { kind, title, reason, load, reps, options, warnings, stagnation }.
  */
-export function suggest({ item, increment, history = [], fatigue = null }) {
+export function suggest({ item, increment, history = [], fatigue = null, deload = false }) {
   const { min, max } = item.reps;
   const rirTarget = item.rir ? item.rir.min : null;
   const mode = loadMode(item, increment);
@@ -85,6 +85,10 @@ export function suggest({ item, increment, history = [], fatigue = null }) {
 
   const last = history[0];
   const sets = last.sets;
+  if (deload) {
+    const l = maxLoad(sets);
+    return { ...out, kind: 'deload', title: mode === 'none' ? 'Semaine de décharge' : `Décharge : rester à ${fmtKg(l)} kg`, reason: 'Semaine de décharge : moitié des séries, mêmes charges, RIR 3–4. On récupère pour mieux repartir.', load: mode === 'none' ? null : l, reps: Math.max(min, Math.min(max, sets[0].reps - 1)) };
+  }
   const load = maxLoad(sets);
   const step = loadStep(increment);
   const threshold = max + ((increment && increment.extraRepsBeforeIncrease) || 0);

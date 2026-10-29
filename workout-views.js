@@ -1,5 +1,6 @@
 // Écrans de séance : démarrage, exercice en cours avec saisie et chronomètre, liste, remplacement, fin.
 import { esc, exName, fmtRange, fmtRest, rirText, shortName } from './views.js';
+import { icon, infoBtn } from './ui.js';
 import { formatDateFr } from './dates.js';
 import { workoutPlan, slotSets, progress, suggestionFor, prefill, restLeft, summary, slotHistory, eveOfRunWarning } from './workout.js';
 import { fmtKg, loadMode, loadLabel, rirFloorWarning, suggest } from './suggest.js';
@@ -15,17 +16,18 @@ export function renderStart(state) {
   const f = starting.fatigue;
   const eve = eveOfRunWarning(s.id, today);
   return `
-    <header class="page-head with-back"><button class="back" data-action="go" data-tab="today">‹ Retour</button><p class="kicker">Séance ${esc(s.id)}</p><h1>${esc(shortName(s))}</h1></header>
-    ${eve ? `<div class="notice warn">${esc(eve)}</div>` : ''}
-    <h3 class="section">Fatigue aujourd'hui ? <span class="opt">facultatif</span></h3>
+    <header class="page-head with-back"><button class="back" data-action="back">${icon('back')} Retour</button><p class="kicker">Séance ${esc(s.id)}${starting.backfill ? `, saisie après coup du ${esc(formatDateFr(starting.date))}` : ''}</p><h1 class="display">${esc(shortName(s).replace(/, \w+$/, ''))}</h1></header>
+    ${eve && !starting.backfill ? `<div class="notice warn">${esc(eve)}</div>` : ''}
+    ${starting.backfill ? `<label class="field"><span class="field-label">Date de la séance</span><input type="date" id="backfill-date" value="${esc(starting.date)}" max="${esc(today)}"></label>` : ''}
+    <h3 class="section">Fatigue ${starting.backfill ? 'ce jour-là' : 'aujourd\'hui'} <span class="opt">facultatif</span></h3>
     <div class="scale five">${[1, 2, 3, 4, 5].map((n) => `<button class="scale-btn${f === n ? ' on' : ''}" data-action="pick-fatigue" data-value="${n}" aria-pressed="${f === n}">${n}</button>`).join('')}</div>
     <div class="scale-legend"><span>en forme</span><span>épuisé</span></div>
     ${f >= 4 ? `<div class="notice warn"><strong>Règle du programme :</strong> ${esc(program.dayAdjustments.find((d) => d.id === 'high-fatigue').reminder)}. Aucune augmentation de charge ne sera proposée aujourd'hui. L'application ne retire rien d'elle-même : à vous d'ajuster.</div>` : ''}
-    <details class="rules" open><summary>Échauffement (~10 min)</summary>
+    ${starting.backfill ? '' : `<details class="rules" open><summary>Échauffement (~10 min) ${infoBtn('warmup')}</summary>
       <p>${esc(warm.cardioMinutes)} min de cardio léger, puis : ${esc(warm.mobility[s.warmup] || '')}</p>
       <p class="muted">${esc(warm.rampSets)}</p>
-    </details>
-    <button class="btn big" data-action="confirm-start">Démarrer</button>`;
+    </details>`}
+    <button class="btn big" data-action="confirm-start">${starting.backfill ? 'Saisir les séries' : 'Démarrer'}</button>`;
 }
 
 function suggestionBox(sug, draft) {
@@ -33,7 +35,7 @@ function suggestionBox(sug, draft) {
   const cls = { increase: 'up', choice: 'up', calibration: 'info', explosive: 'info' }[sug.kind] || 'hold';
   return `
     <div class="sug ${cls}" data-test="suggestion">
-      <div class="sug-title">${sug.kind === 'increase' ? '↑ ' : ''}${esc(sug.title)}</div>
+      <div class="sug-title">${sug.kind === 'increase' ? '↑ ' : ''}${esc(sug.title)}${infoBtn('suggestion')}</div>
       <div class="sug-reason">${esc(sug.reason)}</div>
       ${sug.options.length ? `<div class="sug-opts">${sug.options.map((o, i) => `<button class="chip${draft && draft.option === i ? ' on' : ''}" data-action="pick-option" data-value="${i}">${esc(o.label)}</button>`).join('')}</div>` : ''}
       ${sug.warnings.map((w) => `<div class="sug-warn">${esc(w)}</div>`).join('')}
@@ -81,7 +83,7 @@ export function renderRestBar(workout) {
 /** Calcule (et garde dans l'état) les valeurs de saisie de l'emplacement courant. */
 export function currentContext(state) {
   const { program, active } = state;
-  const plan = workoutPlan(program, active.workout);
+  const plan = workoutPlan(program, active.workout, (state.settings || {}).increments);
   const item = plan.find((x) => x.slotId === active.workout.currentSlot) || plan[0];
   const todaySets = slotSets(active.sets, item.slotId);
   const { history, suggestion } = suggestionFor(item, state.workouts || [], state.sets || [], active.workout);
@@ -131,7 +133,7 @@ export function renderWorkout(state) {
       </div>
       ${item.rir ? `
       <div class="rir">
-        <div class="stepper-label">RIR · répétitions en réserve <span class="muted">(cible ${esc(fmtRange(item.rir))})</span></div>
+        <div class="stepper-label">RIR, répétitions en réserve <span class="muted">(cible ${esc(fmtRange(item.rir))})</span>${infoBtn('rir')}</div>
         <div class="scale six">${[0, 1, 2, 3, 4, 5].map((n) => `<button class="scale-btn${draft.rir === n ? ' on' : ''}${item.rir && n >= item.rir.min && n <= item.rir.max ? ' target' : ''}" data-action="pick-rir" data-value="${n}" aria-pressed="${draft.rir === n}">${n}</button>`).join('')}</div>
         ${floorWarn ? `<div class="sug-warn">${esc(floorWarn)}</div>` : ''}
       </div>` : ''}
@@ -140,15 +142,15 @@ export function renderWorkout(state) {
 
   return `
     <header class="wk-top">
-      <button class="back" data-action="go" data-tab="today" aria-label="Accueil">‹</button>
-      <div class="wk-title"><div>Séance ${esc(s.id)} · S${item.week}</div><div class="muted" id="elapsed"></div></div>
+      <button class="back" data-action="go" data-tab="today" aria-label="Accueil">${icon('back')}</button>
+      <div class="wk-title"><div>Séance ${esc(s.id)}, S${item.week}${item.deload ? ' décharge' : ''}</div><div class="muted" id="elapsed">${w.backfill ? `saisie du ${esc(formatDateFr(w.date, { weekday: false }))}` : ''}</div></div>
       <button class="btn small secondary" data-action="open-sheet" data-value="list">Exercices</button>
     </header>
     <div class="bar thin"><span style="width:${Math.round((p.done / p.planned) * 100)}%"></span></div>
 
     <section class="ex">
-      <div class="ex-kicker"><span class="lbl">${esc(item.label)}</span> Exercice ${idx + 1}/${plan.length}${partner ? ` · supersérie avec ${esc(partner.label)}` : ''}</div>
-      <h1 class="ex-name">${esc(exName(lib, item.exercise))}</h1>
+      <div class="ex-kicker"><span class="lbl">${esc(item.label)}</span> Exercice ${idx + 1} sur ${plan.length}${partner ? `, supersérie avec ${esc(partner.label)} ${infoBtn('superset')}` : ''}</div>
+      <h1 class="ex-name"><button class="link-plain" data-action="open-exercise" data-value="${esc(item.exercise)}">${esc(exName(lib, item.exercise))}</button></h1>
       ${item.swap ? `<div class="pill swap">${item.swap.kind === 'fallback' ? 'Repli' : 'Remplace'} : ${esc(exName(lib, item.planned))}</div>` : ''}
       <div class="ex-target"><span>${item.sets} × ${esc(fmtRange(item.reps))}${item.perSide ? ' /côté' : ''}</span><span>${esc(rirText(item))}</span><span>${!group ? `repos ${esc(fmtRest(item.restSec))}` : group[0].slotId === item.slotId ? `puis ${esc(partner.label)} sans repos` : `repos ${esc(fmtRest(item.restSec))} après le tour`}</span></div>
       ${item.note ? `<div class="slot-note">${esc(item.note)}</div>` : ''}
@@ -169,7 +171,7 @@ export function renderWorkout(state) {
     </div>
     <button class="btn ghost" data-action="finish">Terminer la séance</button>
     ${ui.sheet ? renderSheet(state, plan, item) : ''}
-    <div class="rest-dock" id="rest-dock">${renderRestBar(w)}</div>`;
+    <div class="rest-dock" id="rest-dock">${w.backfill ? '' : renderRestBar(w)}</div>`;
 }
 
 function renderSheet(state, plan, item) {
@@ -193,7 +195,7 @@ function renderSheet(state, plan, item) {
 export function renderFinish(state) {
   const { program, lib, active, finish } = state;
   const w = active.workout;
-  const plan = workoutPlan(program, w);
+  const plan = workoutPlan(program, w, (state.settings || {}).increments);
   const sum = summary(plan, active.sets, w);
   const s = program.sessions.find((x) => x.id === w.sessionId);
   const allSets = [...(state.sets || []).filter((x) => x.workoutId !== w.id), ...active.sets];
@@ -205,7 +207,7 @@ export function renderFinish(state) {
   });
   const d = finish.difficulty;
   return `
-    <header class="page-head with-back"><button class="back" data-action="resume">‹ Revenir à la séance</button><p class="kicker">Fin de séance</p><h1>Séance ${esc(s.id)} — ${esc(shortName(s))}</h1></header>
+    <header class="page-head with-back"><button class="back" data-action="resume">${icon('back')} Revenir à la séance</button><p class="kicker">Fin de séance</p><h1 class="display">Séance ${esc(s.id)}</h1></header>
     <div class="stats">
       <div><span class="stat">${sum.done}<small>/${sum.planned}</small></span><span class="stat-label">séries</span></div>
       <div><span class="stat">${sum.minutes}</span><span class="stat-label">minutes</span></div>
@@ -218,7 +220,7 @@ export function renderFinish(state) {
     <h3 class="section">Difficulté de la séance ? <span class="opt">facultatif</span></h3>
     <div class="scale ten">${[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((n) => `<button class="scale-btn${d === n ? ' on' : ''}" data-action="pick-difficulty" data-value="${n}">${n}</button>`).join('')}</div>
     <div class="scale-legend"><span>très facile</span><span>maximale</span></div>
-    <label class="field"><span class="stepper-label">Note <span class="opt">facultatif</span></span><textarea id="finish-note" rows="2" placeholder="Douleur, matériel occupé, sensations…">${esc(finish.note || '')}</textarea></label>
+    <label class="field"><span class="field-label">Note <span class="opt">facultatif</span></span><textarea id="finish-note" rows="2" placeholder="Douleur, matériel occupé, sensations…">${esc(finish.note || '')}</textarea></label>
     <button class="btn big" data-action="save-workout" data-test="save-workout">Enregistrer la séance</button>
     <button class="btn ghost danger-text" data-action="abandon-workout">Abandonner la séance</button>`;
 }
