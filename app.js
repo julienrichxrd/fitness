@@ -42,8 +42,8 @@ function applyStart() {
 
 async function loadData() {
   const [progFile, lib] = await Promise.all([
-    fetch('./data/programme-cycle-1.json').then((r) => r.json()),
-    fetch('./data/exercises.json').then((r) => r.json()),
+    fetch('./programme-cycle-1.json').then((r) => r.json()),
+    fetch('./exercises.json').then((r) => r.json()),
   ]);
   const libErrors = validateLibrary(lib);
   const progCheck = validateProgram(progFile, lib);
