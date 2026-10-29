@@ -1,0 +1,163 @@
+{
+  "format": "fitness-app",
+  "kind": "program",
+  "schemaVersion": 1,
+  "createdAt": "2026-10-29T10:00:00+01:00",
+  "createdBy": "claude",
+  "summary": "Cycle 1 — calibration après 18 mois d'arrêt. Corrections de l'audit intégrées : totaux 24 / 23 / 26 séries, repli des tractions, passage de semaine conditionné à la récupération.",
+  "source": {
+    "document": "Programme sportif — Cycle 1",
+    "url": "https://claude.ai/artifact/KyvZYyLaiuEiYqxt9AnmoQ",
+    "revision": 18,
+    "referenceFile": "reference/programme-sportif-cycle-1.md"
+  },
+  "program": {
+    "id": "cycle-1",
+    "version": 1,
+    "name": "Cycle 1 — Calibration",
+    "startDate": "2026-11-02",
+    "weeks": 5,
+    "timezone": "Europe/Paris",
+    "sessionOrder": ["A", "B", "C"],
+    "schedule": [
+      { "day": "monday", "session": "A" },
+      { "day": "tuesday", "reminder": "Mobilité A + marche (30 min)" },
+      { "day": "wednesday", "session": "B" },
+      { "day": "thursday", "reminder": "Mobilité B + marche (30 min)" },
+      { "day": "friday", "session": "C" },
+      { "day": "saturday", "reminder": "Course aisée" },
+      { "day": "sunday", "reminder": "Natation technique (~45 min)" }
+    ],
+    "enduranceReminders": {
+      "saturday": {
+        "1": "Course : 35 min faciles",
+        "2": "Course : 40 min faciles",
+        "3": "Course : 40 min faciles + 4 accélérations de 15 s",
+        "4": "Course : 45 min faciles + 4 accélérations de 15 s",
+        "5": "Course : 45 min faciles (35 min si fatigue)"
+      },
+      "sunday": {
+        "1": "Natation : séance S1–S2 (~1 100 m)",
+        "2": "Natation : séance S1–S2 (~1 100 m)",
+        "3": "Natation : séance S3–S5 (~1 300 m)",
+        "4": "Natation : séance S3–S5 (~1 300 m)",
+        "5": "Natation : séance S3–S5 (~1 300 m) + repère 400 m"
+      }
+    },
+    "weekRules": [
+      { "week": 1, "setDelta": -1, "minSets": 2, "rir": { "compound": { "min": 4, "max": 4 }, "isolation": { "min": 3, "max": 4 } }, "label": "Technique, repérage des charges" },
+      { "week": 2, "setDelta": 0, "minSets": 1, "rir": { "compound": { "min": 3, "max": 3 }, "isolation": { "min": 3, "max": 3 } }, "label": "Volume complet, effort modéré" },
+      { "week": 3, "setDelta": 0, "minSets": 1, "rir": { "compound": { "min": 2, "max": 3 }, "isolation": { "min": 2, "max": 2 } }, "label": "Montée de l'effort" },
+      { "week": 4, "setDelta": 0, "minSets": 1, "rir": { "compound": { "min": 2, "max": 2 }, "isolation": { "min": 1, "max": 1 } }, "label": "Séances exigeantes", "rirCheck": "Une série de contrôle jusqu'à l'échec technique sur un exercice d'isolation à la machine, pour recalibrer le RIR" },
+      { "week": 5, "setDelta": 0, "minSets": 1, "rir": { "compound": { "min": 2, "max": 2 }, "isolation": { "min": 1, "max": 1 } }, "label": "Bilan, repères de performance", "deloadIfNeeded": true }
+    ],
+    "progressionGate": {
+      "principle": "On passe aux réglages de la semaine suivante seulement si la récupération suit. Le comptage des séries par muscle est une approximation utile, pas une mesure de la récupération.",
+      "maintainIfAnySignal": [
+        { "id": "fatigue-high", "label": "Fatigue moyenne de 4 ou 5 sur 5 sur la semaine écoulée" },
+        { "id": "soreness-persistent", "label": "Courbatures fortes encore présentes au moment de retravailler le même muscle" },
+        { "id": "performance-drop", "label": "Performances en baisse sur au moins 2 exercices par rapport à la semaine précédente" },
+        { "id": "joint-pain-recurring", "label": "Douleur articulaire, même légère, qui revient d'une séance à l'autre" }
+      ],
+      "deloadIfSignalsAtLeast": 2,
+      "maintainScope": ["muscle", "session", "week"],
+      "maintainedWeekShiftsSchedule": true,
+      "maxMaintainedWeeksBeforeEarlyReview": 2,
+      "decision": "user"
+    },
+    "deload": {
+      "trigger": "Au moins deux signaux en même temps : performances en baisse sur deux séances consécutives, fatigue ou courbatures persistantes, sommeil dégradé, motivation en chute nette",
+      "setFactor": 0.5,
+      "setRounding": "up",
+      "minSets": 1,
+      "load": "same",
+      "rir": { "min": 3, "max": 4 },
+      "enduranceNote": "Course et natation faciles",
+      "durationWeeks": 1
+    },
+    "dayAdjustments": [
+      { "id": "high-fatigue", "when": "Fatigue déclarée 4 ou 5 sur 5", "reminder": "Une série de moins par exercice, RIR +1", "applies": "user" },
+      { "id": "bad-night", "when": "Moins de 6 h de sommeil", "reminder": "RIR +1 et sans la dernière série des polyarticulaires", "applies": "user" },
+      { "id": "strong-soreness", "when": "Courbatures fortes sur le muscle ciblé", "reminder": "Une série de moins sur ce muscle ; si l'amplitude est limitée, sauter l'exercice", "applies": "user" }
+    ],
+    "warmup": {
+      "cardioMinutes": 5,
+      "mobility": {
+        "upper": "10 rotations de bras, 15 écartés avec élastique ou poulie légère, 10 rotations externes d'épaule par côté, 8 rotations thoraciques par côté",
+        "lower": "10 balancements de jambe par côté (avant/arrière et latéral), 8 fentes avec rotation, 10 squats au poids du corps lents, 10 rotations de cheville par côté"
+      },
+      "rampSets": "Premier exercice : 8 répétitions à ~50 %, 5 à ~70 %, 2–3 à ~85 % de la charge de travail, repos 60–90 s. Deuxième exercice : une série de 6 à ~60 % s'il sollicite d'autres articulations."
+    },
+    "sessions": [
+      {
+        "id": "A",
+        "name": "Séance A — Haut, lundi",
+        "day": "monday",
+        "warmup": "upper",
+        "objective": "Pectoraux, dos en largeur et épaisseur, bras",
+        "supersets": [
+          { "id": "A5", "slots": ["A5a", "A5b"], "restAfterRoundSec": 90 },
+          { "id": "A7", "slots": ["A7a", "A7b"], "restAfterRoundSec": 90 }
+        ],
+        "slots": [
+          { "id": "A1", "label": "1", "exercise": "db-bench-press", "category": "compound", "sets": 3, "reps": { "min": 6, "max": 10 }, "restSec": 150, "rirFloor": 2, "cue": "Omoplates serrées, descente 2–3 s jusqu'à l'étirement des pecs", "alternatives": ["barbell-bench-press", "chest-press-machine"], "increment": { "type": "dumbbell", "stepKg": 2 } },
+          { "id": "A2", "label": "2", "exercise": "pullup-pronated", "category": "compound", "sets": 3, "reps": { "min": 6, "max": 10 }, "restSec": 150, "cue": "Bras tendus en bas, menton au-dessus de la barre, pas d'élan", "alternatives": ["lat-pulldown-pronated"], "increment": { "type": "bodyweight", "loadStepKg": 2.5, "addLoadWhenAllSetsReach": 10 }, "fallback": { "belowReps": 6, "exercises": ["lat-pulldown-pronated", "assisted-pullup"], "reps": { "min": 6, "max": 10 }, "scope": "remaining-sets" } },
+          { "id": "A3", "label": "3", "exercise": "chest-supported-db-row", "category": "compound", "sets": 3, "reps": { "min": 8, "max": 12 }, "restSec": 120, "cue": "Coudes vers les hanches, pause 1 s en haut, épaules relâchées en bas", "alternatives": ["seated-row-machine", "seated-cable-row"], "increment": { "type": "dumbbell", "stepKg": 2 } },
+          { "id": "A4", "label": "4", "exercise": "cable-fly", "category": "isolation", "sets": 2, "reps": { "min": 10, "max": 15 }, "restSec": 90, "cue": "Coudes légèrement fléchis et fixes, étirement marqué en arrière", "alternatives": ["pec-deck"], "increment": { "type": "machine", "stepKg": 2.5 } },
+          { "id": "A5a", "label": "5a", "exercise": "cable-lateral-raise", "category": "isolation", "sets": 3, "reps": { "min": 12, "max": 20 }, "restSec": null, "superset": "A5", "cue": "Monter jusqu'à l'horizontale, coude légèrement devant, sans balancer", "alternatives": ["db-lateral-raise"], "increment": { "type": "machine", "stepKg": 2.5, "extraRepsBeforeIncrease": 3 } },
+          { "id": "A5b", "label": "5b", "exercise": "overhead-cable-triceps-ext", "category": "isolation", "sets": 3, "reps": { "min": 10, "max": 15 }, "restSec": null, "superset": "A5", "cue": "Coudes fixes près de la tête, étirement complet derrière", "alternatives": ["seated-db-overhead-ext"], "increment": { "type": "machine", "stepKg": 2.5 } },
+          { "id": "A6", "label": "6", "exercise": "incline-db-curl", "category": "isolation", "sets": 3, "reps": { "min": 8, "max": 12 }, "restSec": 90, "cue": "Bras pendants derrière le buste, pas de mouvement d'épaule", "alternatives": ["bayesian-cable-curl"], "increment": { "type": "dumbbell", "stepKg": 2 } },
+          { "id": "A7a", "label": "7a", "exercise": "seated-leg-curl", "category": "isolation", "sets": 2, "reps": { "min": 10, "max": 15 }, "restSec": null, "superset": "A7", "cue": "Bassin plaqué, descente contrôlée", "alternatives": ["lying-leg-curl"], "increment": { "type": "machine", "stepKg": 2.5 } },
+          { "id": "A7b", "label": "7b", "exercise": "cable-crunch", "category": "isolation", "sets": 2, "reps": { "min": 10, "max": 15 }, "restSec": null, "superset": "A7", "cue": "Enrouler la colonne vers le bassin, hanches immobiles", "alternatives": ["weighted-crunch"], "increment": { "type": "machine", "stepKg": 2.5 } }
+        ]
+      },
+      {
+        "id": "B",
+        "name": "Séance B — Jambes + épaules/bras, mercredi",
+        "day": "wednesday",
+        "warmup": "lower",
+        "objective": "Jambes fortes et mobiles, puis volume supplémentaire sur deltoïdes et bras",
+        "supersets": [
+          { "id": "B4", "slots": ["B4a", "B4b"], "restAfterRoundSec": 90 },
+          { "id": "B6", "slots": ["B6a", "B6b"], "restAfterRoundSec": 90 },
+          { "id": "B7", "slots": ["B7a", "B7b"], "restAfterRoundSec": 90 }
+        ],
+        "slots": [
+          { "id": "B0", "label": "0", "exercise": "box-jump", "category": "explosive", "sets": 3, "reps": { "min": 3, "max": 3 }, "restSec": 90, "cue": "Hauteur modeste, réception silencieuse, redescendre en marchant", "alternatives": ["vertical-jump"], "increment": { "type": "none" }, "stopIf": "Genoux ou chevilles qui réagissent", "weekOverrides": [ { "week": 1, "exercise": "vertical-jump", "sets": 2, "reps": { "min": 3, "max": 3 }, "note": "En S1, 2 × 3 sauts verticaux faciles à la place des sauts sur box" } ] },
+          { "id": "B1", "label": "1", "exercise": "barbell-squat", "category": "compound", "sets": 3, "reps": { "min": 6, "max": 10 }, "restSec": 180, "rirFloor": 2, "cue": "Pieds largeur d'épaules, descendre aussi bas que le dos reste neutre", "alternatives": ["hack-squat", "smith-squat"], "increment": { "type": "barbell", "stepKg": 2.5, "maxStepKg": 5 } },
+          { "id": "B2", "label": "2", "exercise": "db-rdl", "category": "compound", "sets": 3, "reps": { "min": 8, "max": 10 }, "restSec": 150, "rirFloor": 2, "cue": "Hanches en arrière, dos plat, descendre jusqu'à l'étirement des ischios", "alternatives": ["barbell-rdl"], "increment": { "type": "dumbbell", "stepKg": 2 } },
+          { "id": "B3", "label": "3", "exercise": "leg-press", "category": "compound", "sets": 2, "reps": { "min": 10, "max": 15 }, "restSec": 120, "cue": "Amplitude maximale sans décoller le bassin du dossier", "alternatives": ["db-bulgarian-split-squat"], "increment": { "type": "machine", "stepKg": 5 } },
+          { "id": "B4a", "label": "4a", "exercise": "leg-extension", "category": "isolation", "sets": 2, "reps": { "min": 12, "max": 15 }, "restSec": null, "superset": "B4", "cue": "Pause 1 s en haut, descente lente", "alternatives": ["walking-lunge"], "increment": { "type": "machine", "stepKg": 2.5 } },
+          { "id": "B4b", "label": "4b", "exercise": "reverse-pec-deck", "category": "isolation", "sets": 2, "reps": { "min": 12, "max": 20 }, "restSec": null, "superset": "B4", "cue": "Bras presque tendus, mouvement vers l'arrière, sans hausser les épaules", "alternatives": ["bent-over-db-reverse-fly"], "increment": { "type": "machine", "stepKg": 2.5, "extraRepsBeforeIncrease": 3 } },
+          { "id": "B5", "label": "5", "exercise": "seated-db-shoulder-press", "category": "compound", "sets": 2, "reps": { "min": 8, "max": 12 }, "restSec": 120, "rirFloor": 2, "cue": "Dossier à ~80°, descendre jusqu'au niveau des oreilles", "alternatives": ["machine-shoulder-press"], "increment": { "type": "dumbbell", "stepKg": 2 } },
+          { "id": "B6a", "label": "6a", "exercise": "db-lateral-raise", "category": "isolation", "sets": 3, "reps": { "min": 12, "max": 20 }, "restSec": null, "superset": "B6", "cue": "Légère inclinaison du buste vers l'avant, montée contrôlée", "alternatives": ["machine-lateral-raise"], "increment": { "type": "dumbbell", "stepKg": 2, "extraRepsBeforeIncrease": 3 } },
+          { "id": "B6b", "label": "6b", "exercise": "calf-raise", "category": "isolation", "sets": 2, "reps": { "min": 10, "max": 15 }, "restSec": null, "superset": "B6", "cue": "Pause 1–2 s en bas, étirement complet", "alternatives": ["smith-calf-raise"], "increment": { "type": "machine", "stepKg": 5 } },
+          { "id": "B7a", "label": "7a", "exercise": "db-hammer-curl", "category": "isolation", "sets": 2, "reps": { "min": 10, "max": 15 }, "restSec": null, "superset": "B7", "cue": "Coudes collés, pas d'élan", "alternatives": ["rope-hammer-curl"], "increment": { "type": "dumbbell", "stepKg": 2 } },
+          { "id": "B7b", "label": "7b", "exercise": "rope-pushdown", "category": "isolation", "sets": 2, "reps": { "min": 10, "max": 15 }, "restSec": null, "superset": "B7", "cue": "Coudes fixes, écarter la corde en bas", "alternatives": ["straight-bar-pushdown"], "increment": { "type": "machine", "stepKg": 2.5 } }
+        ]
+      },
+      {
+        "id": "C",
+        "name": "Séance C — Haut, vendredi",
+        "day": "friday",
+        "warmup": "upper",
+        "objective": "Haut des pectoraux, largeur du dos, épaules rondes, bras",
+        "supersets": [
+          { "id": "C5", "slots": ["C5a", "C5b"], "restAfterRoundSec": 90 },
+          { "id": "C6", "slots": ["C6a", "C6b"], "restAfterRoundSec": 90 }
+        ],
+        "slots": [
+          { "id": "C1", "label": "1", "exercise": "incline-db-press", "category": "compound", "sets": 3, "reps": { "min": 6, "max": 10 }, "restSec": 150, "rirFloor": 2, "cue": "Descendre jusqu'à l'étirement, coudes à ~45° du buste", "alternatives": ["smith-incline-press"], "increment": { "type": "dumbbell", "stepKg": 2 } },
+          { "id": "C2", "label": "2", "exercise": "lat-pulldown-neutral", "category": "compound", "sets": 3, "reps": { "min": 8, "max": 12 }, "restSec": 120, "cue": "Étirement complet en haut, tirer les coudes vers les côtes", "alternatives": ["pullup-neutral"], "increment": { "type": "machine", "stepKg": 2.5 } },
+          { "id": "C3", "label": "3", "exercise": "dips", "category": "compound", "sets": 3, "reps": { "min": 6, "max": 12 }, "restSec": 120, "cue": "Buste légèrement penché, descendre jusqu'à épaules au niveau des coudes, sans douleur", "alternatives": ["assisted-dip-machine", "decline-press"], "increment": { "type": "bodyweight", "loadStepKg": null, "note": "Pas de lest pendant le cycle 1 ; lest à partir du cycle 2, quand 12 répétitions passent au RIR demandé" }, "weekOverrides": [ { "week": 1, "sets": 2, "reps": { "min": 8, "max": 8 }, "note": "En S1, 2 × 8 au poids du corps, même si vous en faites 20" } ] },
+          { "id": "C4", "label": "4", "exercise": "one-arm-db-row", "category": "compound", "sets": 3, "reps": { "min": 8, "max": 12 }, "perSide": true, "restSec": 90, "cue": "Dos plat, tirer l'haltère vers la hanche", "alternatives": ["one-arm-cable-row"], "increment": { "type": "dumbbell", "stepKg": 2 } },
+          { "id": "C5a", "label": "5a", "exercise": "cable-lateral-raise", "category": "isolation", "sets": 3, "reps": { "min": 12, "max": 20 }, "restSec": null, "superset": "C5", "cue": "Comme lundi", "cueRef": "A5a", "alternatives": ["machine-lateral-raise"], "increment": { "type": "machine", "stepKg": 2.5, "extraRepsBeforeIncrease": 3 } },
+          { "id": "C5b", "label": "5b", "exercise": "cable-reverse-fly", "category": "isolation", "sets": 2, "reps": { "min": 12, "max": 20 }, "restSec": null, "superset": "C5", "cue": "Bras presque tendus, tirer vers l'extérieur", "alternatives": ["reverse-pec-deck"], "increment": { "type": "machine", "stepKg": 2.5, "extraRepsBeforeIncrease": 3 } },
+          { "id": "C6a", "label": "6a", "exercise": "preacher-curl", "category": "isolation", "sets": 3, "reps": { "min": 8, "max": 12 }, "restSec": null, "superset": "C6", "cue": "Extension complète en bas, sans rebond", "alternatives": ["ez-bar-curl"], "increment": { "type": "machine", "stepKg": 2.5 } },
+          { "id": "C6b", "label": "6b", "exercise": "ez-skull-crusher", "category": "isolation", "sets": 3, "reps": { "min": 8, "max": 12 }, "restSec": null, "superset": "C6", "cue": "Descendre derrière le front, coudes stables", "alternatives": ["overhead-cable-triceps-ext"], "increment": { "type": "barbell", "stepKg": 2.5 } },
+          { "id": "C7", "label": "7", "exercise": "hanging-leg-raise", "category": "isolation", "sets": 3, "reps": { "min": 8, "max": 15 }, "restSec": 60, "cue": "Enrouler le bassin, sans balancer", "alternatives": ["roman-chair-knee-raise"], "increment": { "type": "bodyweight", "loadStepKg": null } }
+        ]
+      }
+    ]
+  }
+}

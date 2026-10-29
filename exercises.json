@@ -1,0 +1,106 @@
+{
+  "format": "fitness-app",
+  "kind": "exercise-library",
+  "schemaVersion": 1,
+  "version": 1,
+  "createdAt": "2026-10-29T10:00:00+01:00",
+  "muscles": {
+    "pectoraux": "Pectoraux",
+    "dos": "Dos (grand dorsal, haut du dos)",
+    "deltoide-lateral": "Deltoïde latéral",
+    "deltoide-posterieur": "Deltoïde postérieur",
+    "deltoide-anterieur": "Deltoïde antérieur",
+    "biceps": "Biceps",
+    "triceps": "Triceps",
+    "quadriceps": "Quadriceps",
+    "ischio-jambiers": "Ischio-jambiers",
+    "fessiers": "Fessiers",
+    "mollets": "Mollets",
+    "abdominaux": "Abdominaux"
+  },
+  "exercises": [
+    { "id": "db-bench-press", "name": "Développé couché haltères", "primary": ["pectoraux"], "secondary": ["triceps", "deltoide-anterieur"], "equipment": "haltères, banc" },
+    { "id": "barbell-bench-press", "name": "Développé couché barre", "primary": ["pectoraux"], "secondary": ["triceps", "deltoide-anterieur"], "equipment": "barre, banc" },
+    { "id": "chest-press-machine", "name": "Chest press machine", "primary": ["pectoraux"], "secondary": ["triceps", "deltoide-anterieur"], "equipment": "machine" },
+
+    { "id": "pullup-pronated", "name": "Tractions pronation, prise moyenne", "primary": ["dos"], "secondary": ["biceps"], "equipment": "barre de traction" },
+    { "id": "lat-pulldown-pronated", "name": "Tirage vertical poulie, prise pronation", "primary": ["dos"], "secondary": ["biceps"], "equipment": "poulie haute" },
+    { "id": "assisted-pullup", "name": "Tractions assistées (machine)", "primary": ["dos"], "secondary": ["biceps"], "equipment": "machine de tractions assistée" },
+
+    { "id": "chest-supported-db-row", "name": "Rowing haltères poitrine appuyée (banc à 30°)", "primary": ["dos"], "secondary": ["biceps", "deltoide-posterieur"], "equipment": "haltères, banc inclinable" },
+    { "id": "seated-row-machine", "name": "Rowing assis machine", "primary": ["dos"], "secondary": ["biceps", "deltoide-posterieur"], "equipment": "machine" },
+    { "id": "seated-cable-row", "name": "Rowing poulie basse", "primary": ["dos"], "secondary": ["biceps", "deltoide-posterieur"], "equipment": "poulie basse" },
+
+    { "id": "cable-fly", "name": "Écarté à la poulie vis-à-vis (poulies hautes ou moyennes)", "primary": ["pectoraux"], "secondary": [], "equipment": "vis-à-vis" },
+    { "id": "pec-deck", "name": "Pec deck", "primary": ["pectoraux"], "secondary": [], "equipment": "machine" },
+
+    { "id": "cable-lateral-raise", "name": "Élévations latérales poulie basse, unilatérales", "primary": ["deltoide-lateral"], "secondary": [], "equipment": "poulie basse" },
+    { "id": "db-lateral-raise", "name": "Élévations latérales haltères", "primary": ["deltoide-lateral"], "secondary": [], "equipment": "haltères" },
+    { "id": "machine-lateral-raise", "name": "Élévations latérales machine", "primary": ["deltoide-lateral"], "secondary": [], "equipment": "machine" },
+
+    { "id": "overhead-cable-triceps-ext", "name": "Extension triceps poulie au-dessus de la tête (corde)", "primary": ["triceps"], "secondary": [], "equipment": "poulie, corde" },
+    { "id": "seated-db-overhead-ext", "name": "Extension haltère au-dessus de la tête, assis", "primary": ["triceps"], "secondary": [], "equipment": "haltère, banc" },
+
+    { "id": "incline-db-curl", "name": "Curl incliné haltères (banc à 45–60°)", "primary": ["biceps"], "secondary": [], "equipment": "haltères, banc inclinable" },
+    { "id": "bayesian-cable-curl", "name": "Curl poulie basse, dos à la poulie", "primary": ["biceps"], "secondary": [], "equipment": "poulie basse" },
+
+    { "id": "seated-leg-curl", "name": "Leg curl assis", "primary": ["ischio-jambiers"], "secondary": [], "equipment": "machine" },
+    { "id": "lying-leg-curl", "name": "Leg curl allongé", "primary": ["ischio-jambiers"], "secondary": [], "equipment": "machine" },
+
+    { "id": "cable-crunch", "name": "Crunch à la poulie haute, à genoux", "primary": ["abdominaux"], "secondary": [], "equipment": "poulie haute, corde" },
+    { "id": "weighted-crunch", "name": "Crunch au sol lesté", "primary": ["abdominaux"], "secondary": [], "equipment": "disque ou haltère" },
+
+    { "id": "box-jump", "name": "Sauts sur box", "primary": [], "secondary": [], "equipment": "box" },
+    { "id": "vertical-jump", "name": "Sauts verticaux sur place", "primary": [], "secondary": [], "equipment": "aucun" },
+
+    { "id": "barbell-squat", "name": "Squat barre", "primary": ["quadriceps"], "secondary": ["fessiers"], "equipment": "barre, rack" },
+    { "id": "hack-squat", "name": "Hack squat", "primary": ["quadriceps"], "secondary": ["fessiers"], "equipment": "machine" },
+    { "id": "smith-squat", "name": "Squat à la Smith machine", "primary": ["quadriceps"], "secondary": ["fessiers"], "equipment": "Smith machine" },
+
+    { "id": "db-rdl", "name": "Soulevé de terre roumain haltères", "primary": ["ischio-jambiers"], "secondary": ["fessiers"], "equipment": "haltères" },
+    { "id": "barbell-rdl", "name": "Soulevé de terre roumain barre", "primary": ["ischio-jambiers"], "secondary": ["fessiers"], "equipment": "barre" },
+
+    { "id": "leg-press", "name": "Presse à cuisses", "primary": ["quadriceps"], "secondary": ["fessiers"], "equipment": "machine" },
+    { "id": "db-bulgarian-split-squat", "name": "Fentes bulgares haltères", "primary": ["quadriceps"], "secondary": ["fessiers"], "equipment": "haltères, banc" },
+
+    { "id": "leg-extension", "name": "Leg extension", "primary": ["quadriceps"], "secondary": [], "equipment": "machine" },
+    { "id": "walking-lunge", "name": "Fentes marchées", "primary": ["quadriceps"], "secondary": ["fessiers"], "equipment": "haltères ou poids du corps" },
+
+    { "id": "reverse-pec-deck", "name": "Oiseau à la machine (reverse pec deck)", "primary": ["deltoide-posterieur"], "secondary": [], "equipment": "machine" },
+    { "id": "bent-over-db-reverse-fly", "name": "Oiseau haltères buste penché", "primary": ["deltoide-posterieur"], "secondary": [], "equipment": "haltères" },
+    { "id": "cable-reverse-fly", "name": "Oiseau à la poulie (câbles croisés)", "primary": ["deltoide-posterieur"], "secondary": [], "equipment": "vis-à-vis" },
+
+    { "id": "seated-db-shoulder-press", "name": "Développé militaire haltères assis", "primary": ["deltoide-anterieur"], "secondary": ["deltoide-lateral", "triceps"], "equipment": "haltères, banc" },
+    { "id": "machine-shoulder-press", "name": "Développé épaules machine", "primary": ["deltoide-anterieur"], "secondary": ["deltoide-lateral", "triceps"], "equipment": "machine" },
+
+    { "id": "calf-raise", "name": "Mollets à la presse ou debout", "primary": ["mollets"], "secondary": [], "equipment": "presse ou machine" },
+    { "id": "smith-calf-raise", "name": "Mollets à la Smith machine", "primary": ["mollets"], "secondary": [], "equipment": "Smith machine" },
+
+    { "id": "db-hammer-curl", "name": "Curl marteau haltères", "primary": ["biceps"], "secondary": [], "equipment": "haltères" },
+    { "id": "rope-hammer-curl", "name": "Curl corde à la poulie", "primary": ["biceps"], "secondary": [], "equipment": "poulie basse, corde" },
+
+    { "id": "rope-pushdown", "name": "Extension triceps à la poulie (corde)", "primary": ["triceps"], "secondary": [], "equipment": "poulie haute, corde" },
+    { "id": "straight-bar-pushdown", "name": "Extension barre droite à la poulie", "primary": ["triceps"], "secondary": [], "equipment": "poulie haute, barre droite" },
+
+    { "id": "incline-db-press", "name": "Développé incliné haltères (banc à 30°)", "primary": ["pectoraux"], "secondary": ["triceps", "deltoide-anterieur"], "equipment": "haltères, banc inclinable" },
+    { "id": "smith-incline-press", "name": "Développé incliné Smith machine", "primary": ["pectoraux"], "secondary": ["triceps", "deltoide-anterieur"], "equipment": "Smith machine, banc" },
+
+    { "id": "lat-pulldown-neutral", "name": "Tirage vertical poulie, prise neutre", "primary": ["dos"], "secondary": ["biceps"], "equipment": "poulie haute" },
+    { "id": "pullup-neutral", "name": "Tractions prise neutre", "primary": ["dos"], "secondary": ["biceps"], "equipment": "barre de traction" },
+
+    { "id": "dips", "name": "Dips", "primary": ["pectoraux"], "secondary": ["triceps", "deltoide-anterieur"], "equipment": "barres parallèles" },
+    { "id": "assisted-dip-machine", "name": "Dips machine assistée", "primary": ["pectoraux"], "secondary": ["triceps", "deltoide-anterieur"], "equipment": "machine" },
+    { "id": "decline-press", "name": "Développé décliné", "primary": ["pectoraux"], "secondary": ["triceps", "deltoide-anterieur"], "equipment": "banc décliné" },
+
+    { "id": "one-arm-db-row", "name": "Rowing unilatéral haltère, appui sur banc", "primary": ["dos"], "secondary": ["biceps", "deltoide-posterieur"], "equipment": "haltère, banc" },
+    { "id": "one-arm-cable-row", "name": "Rowing unilatéral poulie basse", "primary": ["dos"], "secondary": ["biceps", "deltoide-posterieur"], "equipment": "poulie basse" },
+
+    { "id": "preacher-curl", "name": "Curl pupitre machine ou barre EZ", "primary": ["biceps"], "secondary": [], "equipment": "pupitre ou machine" },
+    { "id": "ez-bar-curl", "name": "Curl barre EZ debout", "primary": ["biceps"], "secondary": [], "equipment": "barre EZ" },
+
+    { "id": "ez-skull-crusher", "name": "Barre au front (barre EZ)", "primary": ["triceps"], "secondary": [], "equipment": "barre EZ, banc" },
+
+    { "id": "hanging-leg-raise", "name": "Relevés de jambes suspendu", "primary": ["abdominaux"], "secondary": [], "equipment": "barre de traction" },
+    { "id": "roman-chair-knee-raise", "name": "Relevés de genoux sur chaise romaine", "primary": ["abdominaux"], "secondary": [], "equipment": "chaise romaine" }
+  ]
+}
