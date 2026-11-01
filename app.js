@@ -9,6 +9,7 @@ import { loadStep, loadMode } from './suggest.js';
 import { buildBackup, backupFileName, checkBackup, lostByRestore, LOCAL_META } from './backup.js';
 import { buildCalendar } from './cycle.js';
 import { APP_VERSION } from './version.js';
+import { mountAnimations } from './anim.js';
 
 const $ = (sel) => document.querySelector(sel);
 const state = {
@@ -33,6 +34,7 @@ function render() {
   $('#banners').innerHTML = renderBanners(state);
   document.body.dataset.tab = state.tab;
   state.toast = null;
+  mountAnimations($('#main'));
   tick();
 }
 

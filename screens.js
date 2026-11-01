@@ -4,6 +4,8 @@ import { resolveSession } from './program.js';
 import { cycleInfo, formatDateFr, addDays, toDayNumber } from './dates.js';
 import { nextSessionToDo, workoutPlan, slotSets, progress, suggestionFor, prefill, restLeft, summary, setsOf, weekForDate } from './workout.js';
 import { fmtKg, loadMode, loadLabel, rirFloorWarning, bestSet } from './suggest.js';
+import { hasAnimation, cueOf, viewOf, viewBoxOf } from './anim.js';
+import './moves.js';
 
 export const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const range = (r) => (r.min === r.max ? `${r.min}` : `${r.min}–${r.max}`);
@@ -30,6 +32,9 @@ export const icon = (n) => `<svg class="ic" viewBox="0 0 24 24" aria-hidden="tru
 /** Démonstration animée : deux photos (position de départ, position d'arrivée) qui s'enchaînent en boucle. */
 export function demo(lib, id, cls = '') {
   const ex = lib.exercises.find((e) => e.id === id);
+  if (hasAnimation(id)) {
+    return `<div class="demo anim ${cls}" role="img" aria-label="Démonstration animée : ${esc(ex ? ex.name : id)}"><svg data-anim="${esc(id)}" viewBox="${esc(viewBoxOf(id))}" class="${cls === 'thumb' ? 'thumb-svg' : 'anim-svg'}" preserveAspectRatio="xMidYMid meet"></svg>${cls === 'hero' ? `<span class="view">${esc(viewOf(id))}</span>` : ''}</div>`;
+  }
   if (!ex || !ex.image) return `<div class="demo ${cls} empty"><span>${esc(ex ? ex.name : id)}</span></div>`;
   return `<div class="demo ${cls}" role="img" aria-label="Démonstration : ${esc(ex.name)}">
     <img src="./img/${esc(ex.image)}-0.jpg" alt="" loading="lazy" decoding="async">
@@ -222,6 +227,7 @@ export function renderExercise(state) {
       <button class="icon-btn" data-action="open-slot" data-value="${esc(plan[(idx + 1) % plan.length].slotId)}" aria-label="Exercice suivant">${icon('next')}</button>
     </header>
     ${demo(lib, item.exercise, 'hero')}
+    ${cueOf(item.exercise) ? `<p class="cue" data-test="cue">${esc(cueOf(item.exercise))}</p>` : ''}
     <section class="ex">
       <h1 class="h1">${esc(exName(lib, item.exercise))}</h1>
       <div class="chips">

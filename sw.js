@@ -1,10 +1,11 @@
 // Service worker : garde l'application en cache pour fonctionner hors ligne,
 // et n'installe une nouvelle version que lorsque l'utilisateur appuie sur « Mettre à jour ».
 // VERSION doit être identique à APP_VERSION dans version.js (vérifié par les tests).
-const VERSION = '2.0.0';
+const VERSION = '2.1.0';
 const CACHE = `fitness-app-${VERSION}`;
 const ASSETS = [
   './',
+  './anim.js',
   './app.css',
   './app.js',
   './backup.js',
@@ -18,6 +19,7 @@ const ASSETS = [
   './icon-512.png',
   './index.html',
   './manifest.webmanifest',
+  './moves.js',
   './program.js',
   './programme-cycle-1.json',
   './screens.js',
