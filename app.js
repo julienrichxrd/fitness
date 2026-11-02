@@ -1,11 +1,14 @@
-// Point d'entrée : chargement, navigation, séance en cours, sauvegarde, service worker.
+// Point d'entrée : chargement, navigation, séance (saisie dans le tableau), course et natation, sauvegarde, mises à jour.
 import { validateProgram, validateLibrary } from './program.js';
-import { todayLocal, effectiveProgram, cycleInfo } from './dates.js';
+import { todayLocal, effectiveProgram } from './dates.js';
 import { applyStartDateChange, resetStartDate, START_KEY } from './settings.js';
-import { getMeta, setMeta, storageStatus, getAll, putRecord, saveSetAndWorkout, deleteSet, deleteWorkout, readEverything, replaceAll } from './storage.js';
-import { renderHome, renderSession, renderExercise, renderFinish, renderHistory, renderSettings, renderBanners, renderRest, exerciseContext, esc } from './screens.js';
-import { createWorkout, workoutPlan, afterSet, fallbackOffer, restLeft, newId, slotSets } from './workout.js';
-import { loadStep, loadMode } from './suggest.js';
+import { getMeta, setMeta, storageStatus, getAll, putRecord, saveSetAndWorkout, deleteSet, deleteWorkout, deleteRecord, readEverything, replaceAll } from './storage.js';
+import {
+  renderProgram, renderSession, renderProgress, renderExerciseDetail, renderSheet, renderNav, renderBanners, renderRest,
+  sessionModel, shownWeek, parseDuration, fmtDuration, fmtPace, esc,
+} from './screens.js';
+import { createWorkout, afterSet, fallbackOffer, restLeft, newId, slotSets, suggestionFor } from './workout.js';
+import { loadMode } from './suggest.js';
 import { buildBackup, backupFileName, checkBackup, lostByRestore, LOCAL_META } from './backup.js';
 import { buildCalendar } from './cycle.js';
 import { APP_VERSION } from './version.js';
@@ -13,40 +16,53 @@ import { mountAnimations } from './anim.js';
 
 const $ = (sel) => document.querySelector(sel);
 const state = {
-  tab: 'home',
+  tab: 'program',
   today: todayLocal(),
   appVersion: APP_VERSION,
   sw: { supported: 'serviceWorker' in navigator, updateReady: false, checking: false, offline: null },
   standalone: window.matchMedia('(display-mode: standalone)').matches || navigator.standalone === true,
   isIOS: /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1),
   workouts: [], sets: [], entries: [], settings: {},
-  active: null, draft: null, ui: { sheet: null, fallback: null },
-  lastBackup: null, hasSafetyCopy: false, restore: null, backupMsg: null, toast: null, inputError: null,
+  active: null, draftWorkout: null, edits: {}, fallback: null, menu: null,
+  sheet: null, viewWeek: null, selDate: null, pickSession: null, progressTab: 'lift', exerciseId: null,
+  lastBackup: null, hasSafetyCopy: false, restore: null, backupMsg: null, toast: null,
 };
 let registration = null;
 let updateRequested = false;
 const nowIso = () => new Date().toISOString();
-const VIEWS = { home: renderHome, session: renderSession, exercise: renderExercise, finish: renderFinish, history: renderHistory, settings: renderSettings };
+const VIEWS = { program: renderProgram, session: renderSession, progress: renderProgress, exercise: renderExerciseDetail };
 
 function render() {
-  if (['session', 'exercise', 'finish'].includes(state.tab) && !state.active) state.tab = 'home';
+  if (state.tab === 'session' && !state.active && !state.draftWorkout) state.tab = 'program';
+  const y = window.scrollY;
   $('#main').innerHTML = VIEWS[state.tab](state);
+  $('#sheet').innerHTML = renderSheet(state);
+  $('#nav').innerHTML = renderNav(state.tab === 'exercise' ? 'progress' : state.tab);
   $('#banners').innerHTML = renderBanners(state);
   document.body.dataset.tab = state.tab;
+  document.body.classList.toggle('has-sheet', !!state.sheet);
   state.toast = null;
   mountAnimations($('#main'));
+  mountAnimations($('#sheet'));
+  window.scrollTo(0, y);
   tick();
 }
 
 function go(tab) {
   state.tab = tab;
-  state.backupMsg = null;
-  state.startMsg = null;
-  state.inputError = null;
-  state.ui.sheet = null;
+  state.sheet = null;
+  state.menu = null;
   render();
   window.scrollTo(0, 0);
   updateWakeLock();
+}
+
+function openSheet(sheet) {
+  state.sheet = sheet;
+  state.menu = null;
+  render();
+  const el = $('.sheet');
+  if (el) el.scrollTop = 0;
 }
 
 // ---------- Chargement ----------
@@ -89,111 +105,101 @@ async function loadData() {
 
 // ---------- Séance ----------
 
-const planOf = (w) => workoutPlan(state.program, w, state.settings.increments);
+const currentWorkout = () => (state.active ? state.active.workout : state.draftWorkout);
 
 async function persistWorkout() {
+  if (!state.active) return;
   state.active.workout.updatedAt = nowIso();
   await putRecord('workouts', state.active.workout);
 }
 
-async function startWorkout(sessionId) {
+function openSession(sessionId, date) {
   unlockAudio();
-  if (state.active) { go('session'); return; }
-  const w = createWorkout(state.program, sessionId, { date: state.today });
-  await putRecord('workouts', w);
-  state.workouts.push(w);
-  state.active = { workout: w, sets: [] };
-  state.draft = null;
-  state.ui = { sheet: null, fallback: null };
+  if (state.active) {
+    if (state.active.workout.sessionId !== sessionId && !window.confirm(`La séance ${state.active.workout.sessionId} est en cours. La reprendre ?`)) return;
+    state.fallback = null;
+    go('session');
+    return;
+  }
+  const d = date && date < state.today ? date : state.today;
+  if (!state.draftWorkout || state.draftWorkout.sessionId !== sessionId || state.draftWorkout.date !== d) {
+    state.draftWorkout = createWorkout(state.program, sessionId, { date: d });
+    state.edits = {};
+  }
+  state.fallback = null;
   go('session');
 }
 
-function readDraft() {
-  const load = $('#in-load');
-  const reps = $('#in-reps');
-  if (load) { const v = load.value.trim().replace(',', '.'); state.draft.loadKg = v === '' ? null : Number(v); }
-  if (reps) { const v = reps.value.trim(); state.draft.reps = v === '' ? null : Number(v); }
+const toNum = (v) => { const t = String(v ?? '').trim().replace(',', '.'); return t === '' ? null : Number(t); };
+
+function rowInputs(slotId, i) {
+  const q = (f) => document.querySelector(`input[data-slot="${CSS.escape(slotId)}"][data-i="${i}"][data-f="${f}"]`);
+  return { kg: q('kg'), reps: q('reps') };
 }
 
-async function validateSet() {
+function toast(text) {
+  state.toast = text;
+}
+
+async function doSet(slotId, i) {
   unlockAudio();
-  readDraft();
-  const { plan, item, todaySets } = exerciseContext(state);
-  const d = state.draft;
+  const w = currentWorkout();
+  const { plan } = sessionModel(state);
+  const item = plan.find((x) => x.slotId === slotId);
   const mode = loadMode(item, item.increment);
-  if (mode === 'external' && (d.loadKg === null || !Number.isFinite(d.loadKg) || d.loadKg < 0 || d.loadKg > 500)) {
-    state.inputError = 'Indiquez le poids utilisé.';
-    render();
-    return;
-  }
-  if (d.reps === null || !Number.isInteger(d.reps) || d.reps < 0 || d.reps > 100) {
-    state.inputError = 'Indiquez le nombre de répétitions.';
-    render();
-    return;
-  }
-  state.inputError = null;
+  const inp = rowInputs(slotId, i);
+  const kg = inp.kg ? toNum(inp.kg.value) : null;
+  const reps = inp.reps ? toNum(inp.reps.value) : null;
+  const bad = (el, msg) => { if (el) { el.classList.add('bad'); el.focus(); } flash(msg); };
+  if (mode === 'external' && (kg === null || !Number.isFinite(kg) || kg < 0 || kg > 500)) return bad(inp.kg, 'Indiquez le poids.');
+  if (mode === 'added' && kg !== null && (!Number.isFinite(kg) || kg < 0 || kg > 200)) return bad(inp.kg, 'Lest invalide.');
+  if (reps === null || !Number.isInteger(reps) || reps < 0 || reps > 100) return bad(inp.reps, 'Indiquez les répétitions.');
   const now = nowIso();
+  if (!state.active) {
+    w.startedAt = now;
+    w.createdAt = now;
+    state.active = { workout: w, sets: [] };
+    state.workouts.push(w);
+    state.draftWorkout = null;
+  }
+  const done = slotSets(state.active.sets, slotId);
   const set = {
-    id: newId('s'), workoutId: state.active.workout.id, slotId: item.slotId, exercise: item.exercise, index: todaySets.length + 1,
-    loadKg: mode === 'none' ? null : (Number.isFinite(d.loadKg) ? d.loadKg : 0), reps: d.reps, rir: item.rir ? d.rir : null,
+    id: newId('s'), workoutId: w.id, slotId, exercise: item.exercise, index: done.length + 1,
+    loadKg: mode === 'none' ? null : (Number.isFinite(kg) ? kg : 0), reps, rir: null,
     perSide: !!item.perSide, kind: 'work', doneAt: now, createdAt: now, updatedAt: now,
   };
   const sets = [...state.active.sets, set];
-  const next = afterSet(plan, sets, item.slotId);
-  const offer = fallbackOffer(item, sets, set.reps);
-  const w = state.active.workout;
-  // On reste sur l'exercice terminé (écran « Exercice terminé ») sauf dans une supersérie, qui s'enchaîne seule.
-  const stay = offer || next.reason === 'next-exercise' || next.reason === 'finished';
-  w.currentSlot = stay ? item.slotId : next.next;
+  const next = afterSet(plan, sets, slotId);
+  const offer = fallbackOffer(item, sets, reps);
   w.restTotalSec = next.restSec || null;
   w.restEndsAt = next.restSec ? Date.now() + next.restSec * 1000 : null;
-  w.nextSlot = next.next;
+  w.currentSlot = next.next || slotId;
   w.updatedAt = now;
   try {
     await saveSetAndWorkout(set, w);
   } catch (e) {
-    state.inputError = `Série non enregistrée : ${e.message}`;
-    render();
-    return;
+    flash(`Série non enregistrée : ${e.message}`);
+    return null;
   }
   state.active.sets = sets;
   state.sets.push(set);
+  const ed = state.edits[slotId];
+  if (ed) delete ed[i];
   restSignaled = false;
-  state.ui.fallback = offer;
-  state.draft = null;
-  if (next.reason === 'finished' && !offer) { go('finish'); return; }
+  state.fallback = offer ? { slotId, ...offer } : null;
   render();
-  window.scrollTo({ top: 0, behavior: 'smooth' });
+  if (next.reason === 'finished' && !offer) { openSheet({ type: 'finish' }); return null; }
+  if (next.reason === 'next-exercise' || next.reason === 'superset' || next.reason === 'round') {
+    const el = document.getElementById(`ex-${next.next}`);
+    if (el && next.reason === 'next-exercise') setTimeout(() => el.scrollIntoView({ behavior: 'smooth', block: 'start' }), 250);
+  }
+  return null;
 }
 
-async function openSlot(slotId) {
-  state.active.workout.currentSlot = slotId;
-  state.draft = null;
-  state.inputError = null;
-  state.ui = { sheet: null, fallback: null };
-  await persistWorkout();
-  go('exercise');
-}
-
-async function swapExercise(exerciseId, kind) {
-  const w = state.active.workout;
-  const slotId = w.currentSlot;
-  const item = planOf(w).find((x) => x.slotId === slotId);
-  w.swaps = { ...(w.swaps || {}) };
-  if (exerciseId === item.planned) delete w.swaps[slotId];
-  else w.swaps[slotId] = { exercise: exerciseId, kind, fromSet: slotSets(state.active.sets, slotId).length + 1 };
-  state.ui = { sheet: null, fallback: null };
-  state.draft = null;
-  await persistWorkout();
-  render();
-}
-
-async function removeSet(id) {
-  if (!window.confirm('Supprimer cette série ?')) return;
+async function undoSet(id) {
   const set = state.sets.find((s) => s.id === id);
-  if (!set) return;
+  if (!set || !state.active) return;
   const w = state.active.workout;
-  w.currentSlot = set.slotId;
   w.restEndsAt = null;
   await deleteSet(id, w);
   state.sets = state.sets.filter((s) => s.id !== id);
@@ -202,7 +208,21 @@ async function removeSet(id) {
     if (rest[i].index !== i + 1) { rest[i].index = i + 1; await putRecord('sets', rest[i]); }
   }
   state.active.sets = state.sets.filter((s) => s.workoutId === w.id);
-  state.draft = null;
+  state.edits[set.slotId] = { ...(state.edits[set.slotId] || {}), [set.index - 1]: { kg: set.loadKg, reps: set.reps } };
+  render();
+}
+
+async function swapExercise(slotId, exerciseId, kind) {
+  const w = currentWorkout();
+  const { plan } = sessionModel(state);
+  const item = plan.find((x) => x.slotId === slotId);
+  w.swaps = { ...(w.swaps || {}) };
+  if (exerciseId === item.planned) delete w.swaps[slotId];
+  else w.swaps[slotId] = { exercise: exerciseId, kind, fromSet: slotSets(state.active ? state.active.sets : [], slotId).length + 1 };
+  state.fallback = null;
+  state.menu = null;
+  delete state.edits[slotId];
+  await persistWorkout();
   render();
 }
 
@@ -218,11 +238,84 @@ async function saveWorkout(status) {
     await deleteWorkout(w.id);
   }
   await loadRecords();
-  state.toast = status === 'done' ? 'Séance enregistrée. Bien joué.' : 'Séance abandonnée.';
-  go('home');
+  state.draftWorkout = null;
+  state.edits = {};
+  state.fallback = null;
+  toast(status === 'done' ? 'Séance enregistrée.' : 'Séance abandonnée.');
+  go('program');
 }
 
-// ---------- Chronomètre de repos (sans redessiner la page) ----------
+let flashTimer = null;
+function flash(text) {
+  let el = $('#flash');
+  if (!el) { el = document.createElement('div'); el.id = 'flash'; document.body.appendChild(el); }
+  el.textContent = text;
+  el.className = 'flash on';
+  clearTimeout(flashTimer);
+  flashTimer = setTimeout(() => { el.className = 'flash'; }, 2200);
+}
+
+// ---------- Course, natation, mobilité ----------
+
+function enduranceDraft(kind, date, title) {
+  return { kind, date: date > state.today ? state.today : date, title: title || '', distanceM: null, durationSec: null, note: '' };
+}
+
+/** Deux cases remplies sur trois : la troisième se calcule. Le champ recalculé est le moins récemment touché. */
+let touched = [];
+function calcEndurance(form, changed) {
+  touched = [changed, ...touched.filter((x) => x !== changed)].slice(0, 3);
+  const run = state.sheet && state.sheet.draft.kind === 'run';
+  const unit = run ? 1000 : 100;
+  const f = { dist: form.elements.dist, dur: form.elements.dur, pace: form.elements.pace };
+  const dist = toNum(f.dist.value);
+  const distM = dist && dist > 0 ? (run ? dist * 1000 : dist) : null;
+  const dur = parseDuration(f.dur.value);
+  const pace = parseDuration(f.pace.value) && f.pace.value.includes(':') ? parseDuration(f.pace.value) : (toNum(f.pace.value) ? Math.round(toNum(f.pace.value) * 60) : null);
+  const target = ['dist', 'dur', 'pace'].find((k) => !touched.slice(0, 2).includes(k));
+  if (touched.length < 2 || !target) return;
+  if (target === 'pace' && distM && dur) f.pace.value = fmtPace(dur / (distM / unit));
+  if (target === 'dur' && distM && pace) f.dur.value = fmtDuration(pace * (distM / unit));
+  if (target === 'dist' && dur && pace) {
+    const m = (dur / pace) * unit;
+    f.dist.value = run ? String(Math.round(m / 10) / 100).replace('.', ',') : String(Math.round(m));
+  }
+}
+
+async function saveEndurance(form) {
+  const sh = state.sheet;
+  const run = sh.draft.kind === 'run';
+  const unit = run ? 1000 : 100;
+  const fd = new FormData(form);
+  const dist = toNum(fd.get('dist'));
+  let distM = dist !== null && Number.isFinite(dist) && dist > 0 ? Math.round(run ? dist * 1000 : dist) : null;
+  let dur = parseDuration(fd.get('dur'));
+  const pv = String(fd.get('pace') || '');
+  const pace = pv.includes(':') ? parseDuration(pv) : (toNum(pv) ? Math.round(toNum(pv) * 60) : null);
+  if (!dur && distM && pace) dur = Math.round(pace * (distM / unit));
+  if (!distM && dur && pace) distM = Math.round((dur / pace) * unit);
+  const err = (t) => { sh.error = t; render(); };
+  if (!distM && !dur) return err(`Indiquez au moins deux valeurs : distance, durée ou allure.`);
+  if (distM && (distM > 300000)) return err('Distance trop grande.');
+  if (dur && dur > 86400) return err('Durée trop longue.');
+  const date = String(fd.get('date') || state.today);
+  if (date > state.today) return err('La date ne peut pas être dans le futur.');
+  const old = sh.editId ? state.entries.find((e) => e.id === sh.editId) : null;
+  const now = nowIso();
+  const entry = {
+    ...(old || {}), id: old ? old.id : newId('e'), kind: sh.draft.kind, date, title: String(fd.get('title') || '').trim().slice(0, 80),
+    distanceM: distM, durationSec: dur || null, note: String(fd.get('note') || '').trim().slice(0, 200), createdAt: old ? old.createdAt : now, updatedAt: now,
+  };
+  await putRecord('entries', entry);
+  state.entries = state.entries.filter((e) => e.id !== entry.id).concat(entry);
+  state.sheet = null;
+  if (state.tab === 'program') { state.selDate = entry.date; state.pickSession = null; }
+  toast(run ? 'Course enregistrée.' : 'Natation enregistrée.');
+  render();
+  return null;
+}
+
+// ---------- Chronomètre de repos ----------
 
 let audioCtx = null;
 function unlockAudio() {
@@ -256,7 +349,7 @@ function tick() {
   const w = state.active && state.active.workout;
   const el = $('#elapsed');
   if (el && w) el.textContent = `${Math.max(0, Math.floor((Date.now() - Date.parse(w.startedAt)) / 60000))} min`;
-  if (!w) return;
+  if (!w || state.tab !== 'session') return;
   const left = restLeft(w);
   if (left === null) return;
   const time = $('#rest-time');
@@ -277,7 +370,7 @@ setInterval(tick, 500);
 let wakeLock = null;
 async function updateWakeLock() {
   try {
-    if (['session', 'exercise'].includes(state.tab) && document.visibilityState === 'visible' && 'wakeLock' in navigator) {
+    if (state.tab === 'session' && document.visibilityState === 'visible' && 'wakeLock' in navigator) {
       if (!wakeLock) {
         wakeLock = await navigator.wakeLock.request('screen');
         wakeLock.addEventListener('release', () => { wakeLock = null; });
@@ -321,7 +414,6 @@ async function doBackup() {
   } catch (e) {
     state.backupMsg = { ok: false, text: `Sauvegarde impossible : ${e.message}` };
   }
-  if (state.tab !== 'settings') state.toast = state.backupMsg.text;
   render();
 }
 
@@ -360,6 +452,7 @@ async function saveStart(result, okText) {
     await setMeta(START_KEY, result.override);
     state.startOverride = result.override;
     rebuildProgram();
+    state.viewWeek = null;
     state.startMsg = { ok: true, text: okText };
   }
   render();
@@ -369,46 +462,41 @@ async function saveStart(result, okText) {
 
 const ACTIONS = {
   go: (el) => go(el.dataset.tab),
-  start: (el) => startWorkout(el.dataset.session),
+  week: (el) => {
+    const { totalWeeks, calWeek } = shownWeek(state);
+    state.viewWeek = Math.max(1, Math.min(totalWeeks, calWeek + Number(el.dataset.value)));
+    state.selDate = null;
+    state.pickSession = null;
+    render();
+  },
+  'pick-day': (el) => { state.selDate = el.dataset.value; state.pickSession = null; render(); },
+  'pick-session': (el) => { state.pickSession = el.dataset.value; render(); },
+  'open-session': (el) => openSession(el.dataset.value, el.dataset.date),
   resume: () => go('session'),
-  'open-slot': (el) => openSlot(el.dataset.value),
-  'next-exercise': () => {
-    const w = state.active.workout;
-    const plan = planOf(w);
-    const nx = plan.find((x, i) => i > plan.findIndex((y) => y.slotId === w.currentSlot) && slotSets(state.active.sets, x.slotId).length < x.sets)
-      || plan.find((x) => slotSets(state.active.sets, x.slotId).length < x.sets);
-    if (nx) openSlot(nx.slotId); else go('finish');
-  },
-  'step-load': (el) => {
-    readDraft();
-    const { item } = exerciseContext(state);
-    const step = loadStep(item.increment) || 1;
-    state.draft.loadKg = Math.max(0, Math.round(((state.draft.loadKg || 0) + Number(el.dataset.dir) * step) * 100) / 100);
-    render();
-  },
-  'step-reps': (el) => { readDraft(); state.draft.reps = Math.max(0, (state.draft.reps || 0) + Number(el.dataset.dir)); render(); },
-  'pick-rir': (el) => { readDraft(); state.draft.rir = Number(el.dataset.value); render(); },
-  'pick-option': (el) => {
-    readDraft();
-    const { suggestion } = exerciseContext(state);
-    const o = suggestion.options[Number(el.dataset.value)];
-    Object.assign(state.draft, { option: Number(el.dataset.value), loadKg: o.load, reps: o.reps });
-    render();
-  },
-  'validate-set': () => validateSet(),
-  'delete-set': (el) => removeSet(el.dataset.id),
-  'extra-set': async () => {
-    const w = state.active.workout;
-    w.extraSets = { ...(w.extraSets || {}), [w.currentSlot]: ((w.extraSets || {})[w.currentSlot] || 0) + 1 };
-    state.draft = null;
+  'close-session': () => { state.fallback = null; go('program'); },
+  'show-demo': (el) => openSheet({ type: 'demo', id: el.dataset.value }),
+  'ex-menu': (el) => { state.menu = state.menu === el.dataset.value ? null : el.dataset.value; render(); },
+  swap: (el) => swapExercise(el.dataset.slot, el.dataset.value, 'alternative'),
+  'accept-fallback': (el) => swapExercise(el.dataset.slot, el.dataset.value, 'fallback'),
+  'refuse-fallback': () => { state.fallback = null; render(); },
+  'do-set': (el) => doSet(el.dataset.slot, Number(el.dataset.i)),
+  'undo-set': (el) => undoSet(el.dataset.id),
+  'add-set': async (el) => {
+    const w = currentWorkout();
+    w.extraSets = { ...(w.extraSets || {}), [el.dataset.value]: ((w.extraSets || {})[el.dataset.value] || 0) + 1 };
     await persistWorkout();
     render();
   },
-  'swap-open': () => { state.ui.sheet = 'swap'; render(); },
-  'swap-close': () => { state.ui.sheet = null; render(); },
-  swap: (el) => swapExercise(el.dataset.value, 'alternative'),
-  'accept-fallback': (el) => swapExercise(el.dataset.value, 'fallback'),
-  'refuse-fallback': () => { state.ui.fallback = null; render(); },
+  'pick-option': (el) => {
+    const { plan } = sessionModel(state);
+    const item = plan.find((x) => x.slotId === el.dataset.slot);
+    const { suggestion } = suggestionFor(item, state.workouts, state.sets, currentWorkout());
+    const o = suggestion.options[Number(el.dataset.value)];
+    const ed = {};
+    for (let i = 0; i < item.sets; i += 1) ed[i] = { kg: o.load, reps: o.reps };
+    state.edits[item.slotId] = ed;
+    render();
+  },
   'rest-adjust': async (el) => {
     const w = state.active.workout;
     if (!w.restEndsAt) return;
@@ -425,10 +513,41 @@ const ACTIONS = {
     const dock = $('#rest-dock');
     if (dock) dock.innerHTML = '';
   },
-  finish: () => go('finish'),
+  finish: () => openSheet({ type: 'finish' }),
   'save-workout': () => saveWorkout('done'),
   'abandon-workout': () => { if (window.confirm('Abandonner cette séance ? Les séries faites seront effacées.')) saveWorkout('abandoned'); },
-  'toggle-history': (el) => { state.historyOpen = state.historyOpen === el.dataset.value ? null : el.dataset.value; render(); },
+  'close-sheet': () => { state.sheet = null; state.restore = null; render(); },
+  'log-endurance': (el) => { touched = []; openSheet({ type: 'endurance', draft: enduranceDraft(el.dataset.kind, el.dataset.date, el.dataset.title) }); },
+  'edit-endurance': (el) => {
+    const e = state.entries.find((x) => x.id === el.dataset.id);
+    if (!e) return;
+    touched = ['dist', 'dur'];
+    openSheet({ type: 'endurance', editId: e.id, draft: { kind: e.kind, date: e.date, title: e.title || '', distanceM: e.distanceM, durationSec: e.durationSec, note: e.note || '' } });
+  },
+  'delete-endurance': async (el) => {
+    if (!window.confirm('Supprimer cette séance ?')) return;
+    await deleteRecord('entries', el.dataset.id);
+    state.entries = state.entries.filter((e) => e.id !== el.dataset.id);
+    state.sheet = null;
+    render();
+  },
+  'toggle-mobility': async (el) => {
+    const date = el.dataset.date;
+    const ex = state.entries.find((e) => e.kind === 'mobility' && e.date === date);
+    if (ex) {
+      await deleteRecord('entries', ex.id);
+      state.entries = state.entries.filter((e) => e.id !== ex.id);
+    } else {
+      const now = nowIso();
+      const e = { id: newId('e'), kind: 'mobility', date: date > state.today ? state.today : date, createdAt: now, updatedAt: now };
+      await putRecord('entries', e);
+      state.entries.push(e);
+    }
+    render();
+  },
+  'progress-tab': (el) => { state.progressTab = el.dataset.value; render(); },
+  'open-exercise': (el) => { state.exerciseId = el.dataset.value; go('exercise'); },
+  settings: () => { state.backupMsg = null; state.startMsg = null; openSheet({ type: 'settings' }); },
   'delete-workout': async (el) => {
     if (!window.confirm('Supprimer définitivement cette séance ?')) return;
     await deleteWorkout(el.dataset.id);
@@ -447,17 +566,44 @@ const ACTIONS = {
 
 document.addEventListener('click', async (ev) => {
   const el = ev.target.closest('[data-action]');
-  if (!el || (el.tagName === 'INPUT')) return;
+  if (!el || el.tagName === 'INPUT') return;
   const fn = ACTIONS[el.dataset.action];
   if (!fn) return;
   try { await fn(el, ev); } catch (e) { console.error(e); window.alert(`Action impossible : ${e.message}`); }
 });
 
 document.addEventListener('submit', (ev) => {
-  const form = ev.target.closest('[data-form="start-date"]');
+  const form = ev.target.closest('form');
   if (!form) return;
   ev.preventDefault();
-  saveStart(applyStartDateChange(state.startOverride, state.fileProgram, String(new FormData(form).get('start')), { today: state.today }), 'Date enregistrée.');
+  if (form.dataset.form === 'start-date') saveStart(applyStartDateChange(state.startOverride, state.fileProgram, String(new FormData(form).get('start')), { today: state.today }), 'Date enregistrée.');
+  if (form.dataset.form === 'endurance') saveEndurance(form).catch((e) => { state.sheet.error = e.message; render(); });
+});
+
+document.addEventListener('input', (ev) => {
+  const t = ev.target;
+  if (t.dataset && t.dataset.calc) { calcEndurance(t.form, t.dataset.calc); return; }
+  if (!t.dataset || !t.dataset.slot || !t.dataset.f) return;
+  t.classList.remove('bad');
+  const slot = t.dataset.slot;
+  const i = Number(t.dataset.i);
+  const v = toNum(t.value);
+  state.edits[slot] = state.edits[slot] || {};
+  state.edits[slot][i] = { ...(state.edits[slot][i] || {}), [t.dataset.f]: v };
+  // Le poids changé se reporte sur les séries suivantes pas encore faites.
+  if (t.dataset.f === 'kg') {
+    document.querySelectorAll(`input[data-slot="${CSS.escape(slot)}"][data-f="kg"]`).forEach((other) => {
+      const j = Number(other.dataset.i);
+      if (j > i && !other.disabled) {
+        other.value = t.value;
+        state.edits[slot][j] = { ...(state.edits[slot][j] || {}), kg: v };
+      }
+    });
+  }
+});
+
+document.addEventListener('focusin', (ev) => {
+  if (ev.target.classList && (ev.target.classList.contains('num') || ev.target.classList.contains('big-in'))) setTimeout(() => { try { ev.target.select(); } catch { /* ignoré */ } }, 0);
 });
 
 document.addEventListener('change', async (ev) => {
@@ -470,8 +616,13 @@ document.addEventListener('change', async (ev) => {
   render();
 });
 
-document.addEventListener('focusin', (ev) => {
-  if (ev.target.classList && ev.target.classList.contains('step-input')) setTimeout(() => { try { ev.target.select(); } catch { /* ignoré */ } }, 0);
+document.addEventListener('keydown', (ev) => {
+  if (ev.key === 'Escape' && state.sheet) { state.sheet = null; render(); }
+  if (ev.key === 'Enter' && ev.target.dataset && ev.target.dataset.slot) {
+    ev.preventDefault();
+    const { slot, i, f } = ev.target.dataset;
+    if (f === 'kg') { const r = rowInputs(slot, i).reps; if (r) r.focus(); } else doSet(slot, Number(i));
+  }
 });
 
 // ---------- Service worker ----------
@@ -480,7 +631,7 @@ function askOfflineStatus() {
   const ctrl = navigator.serviceWorker && navigator.serviceWorker.controller;
   if (!ctrl) return;
   const ch = new MessageChannel();
-  ch.port1.onmessage = (e) => { state.sw.offline = e.data; if (state.tab === 'settings') render(); };
+  ch.port1.onmessage = (e) => { state.sw.offline = e.data; if (state.sheet && state.sheet.type === 'settings') render(); };
   ctrl.postMessage({ type: 'STATUS' }, [ch.port2]);
 }
 
@@ -531,7 +682,7 @@ document.addEventListener('visibilitychange', () => {
   updateWakeLock();
   if (document.visibilityState !== 'visible') return;
   const now = todayLocal();
-  if (now !== state.today) { state.today = now; if (state.tab === 'home') render(); }
+  if (now !== state.today) { state.today = now; if (state.tab === 'program' && !state.sheet) render(); }
   tick();
   checkForUpdate(false);
 });
@@ -540,14 +691,13 @@ async function start() {
   try {
     await loadData();
   } catch (e) {
-    $('#main').innerHTML = `<h1 class="h1">Problème de chargement</h1><div class="err">${(e.messages || ['Impossible de lire le programme. Vérifiez la connexion pour la première ouverture.']).map(esc).join('<br>')}</div>`;
+    $('#main').innerHTML = `<h1>Problème de chargement</h1><p class="err">${(e.messages || ['Impossible de lire le programme. Vérifiez la connexion pour la première ouverture.']).map(esc).join('<br>')}</p>`;
     return;
   }
   if (state.active) state.tab = 'session';
   render();
   initServiceWorker();
   storageStatus().catch(() => null);
-  if (cycleInfo(state.program, state.today).status === 'during') { /* rien de plus à préparer */ }
 }
 
 start();
