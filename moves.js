@@ -51,7 +51,7 @@ export const MOVES = {
       const bend = (s) => ({ to: { x: 200 + s * 64, y: 40 }, bend: s > 0 ? -1 : 1 });
       const b = front({ cx: 200, hipY, back: true, armL: bend(-1), armR: bend(1), legL: { to: { x: 192, y: hipY + 118 }, bend: 1 }, legR: { to: { x: 208, y: hipY + 118 }, bend: -1 } });
       void shY;
-      return all(line([{ x: 70, y: 40 }, { x: 330, y: 40 }], C.steel, 7), post(74, 40, 100), post(326, 40, 100), b.items, b.near);
+      return all(line([{ x: 70, y: 40 }, { x: 330, y: 40 }], C.steel, 7), post(74, 40, 100), post(326, 40, 100), p.lest === false ? [] : [line([{ x: 194, y: hipY + 4 }, { x: 200, y: hipY + 36 }, { x: 206, y: hipY + 4 }], C.steel, 3), plate({ x: 200, y: hipY + 50 }, 17)], b.items, b.near);
     },
   },
   'assisted-pullup': {
@@ -385,7 +385,22 @@ export const MOVES = {
     draw(p) {
       const grip = { x: 206, y: 132 };
       const b = side({ hip: { x: p.hx, y: p.hy }, tor: p.tor, head: 10, armN: { to: grip, bend: 1 }, legN: { a1: 100, a2: 205, foot: 120 } });
-      return all(floor(), post(214, 132), post(196, 132), b.items, b.near, circle(grip, 7, C.steel));
+      const belt = pt({ x: p.hx, y: p.hy }, 8, p.tor + 180);
+      return all(floor(), post(214, 132), post(196, 132), line([belt, add(belt, 2, 34)], C.steel, 3), plate(add(belt, 2, 48), 16), b.items, b.near, circle(grip, 7, C.steel));
+    },
+  },
+  'weighted-push-up': {
+    view: 'Vue de profil',
+    cue: 'Corps gainé comme une planche de la tête aux talons : imaginez que vous repoussez le sol loin de vous, et gardez les coudes à 45° du buste.',
+    keys: rep({ a: 25 }, { a: 8 }, eccentricFirst),
+    draw(p) {
+      const feet = { x: 62, y: 252 };
+      const r = (p.a * Math.PI) / 180;
+      const hip = { x: feet.x + 124 * Math.cos(r), y: feet.y - 124 * Math.sin(r) };
+      const hand = { x: 240, y: 256 };
+      const b = side({ hip, tor: -p.a, head: 4, armN: { to: hand, bend: 1 }, legN: { to: feet, bend: -1, foot: 60 } });
+      const back = pt(pt(hip, 44, -p.a), 22, -p.a - 90);
+      return all(floor(), b.items, b.near, plate(back, 18));
     },
   },
   'one-arm-db-row': {
