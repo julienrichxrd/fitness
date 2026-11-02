@@ -152,7 +152,7 @@ export function renderProgram(state) {
   const extra = (state.entries || []).filter((e) => e.date === d.date && (e.kind === 'run' || e.kind === 'swim') && !(e.kind === d.kind && !state.pickSession));
   return `
     <header class="top">
-      <div><p class="kicker">${esc(info.status === 'before' ? `Début ${formatDateFr(program.startDate)}` : `${program.name}`)}</p>
+      <div><p class="brand"><img src="./icon-192.png" alt="">JR Athletics</p><p class="kicker">${esc(info.status === 'before' ? `Début ${formatDateFr(program.startDate)}` : `${program.name}`)}</p>
       <h1>Semaine ${calWeek}<small> / ${totalWeeks}</small></h1></div>
       <div class="top-actions">
         <button class="icon-btn" data-action="week" data-value="-1" aria-label="Semaine précédente"${calWeek <= 1 ? ' disabled' : ''}>${icon('back')}</button>
@@ -355,7 +355,7 @@ export function renderProgress(state) {
       <button class="btn ${kind}" data-action="log-endurance" data-kind="${kind}" data-date="${esc(state.today)}" data-title="${kind === 'run' ? 'Course' : 'Natation'}">${icon('plus')} Noter ${kind === 'run' ? 'une course' : 'une séance de natation'}</button>
       ${list.length ? `<div class="end-list">${list.map((e) => `<p class="end-date">${esc(formatDateFr(e.date))}</p>${enduranceRow(e)}`).join('')}</div>` : '<p class="empty">Aucune séance notée pour l\'instant.</p>'}`;
   }
-  return `<header class="top"><div><h1>Progrès</h1></div><div class="top-actions"><button class="icon-btn" data-action="settings" aria-label="Réglages">${icon('gear')}</button></div></header>
+  return `<header class="top"><div><p class="brand"><img src="./icon-192.png" alt="">JR Athletics</p><h1>Progrès</h1></div><div class="top-actions"><button class="icon-btn" data-action="settings" aria-label="Réglages">${icon('gear')}</button></div></header>
     <div class="seg">${seg}</div>${body}`;
 }
 
