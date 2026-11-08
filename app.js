@@ -4,8 +4,8 @@ import { todayLocal, effectiveProgram } from './dates.js';
 import { applyStartDateChange, resetStartDate, START_KEY } from './settings.js';
 import { getMeta, setMeta, storageStatus, getAll, putRecord, saveSetAndWorkout, deleteSet, deleteWorkout, deleteRecord, readEverything, replaceAll } from './storage.js';
 import {
-  renderProgram, renderSession, renderProgress, renderExerciseDetail, renderSheet, renderNav, renderBanners, renderRest,
-  sessionModel, shownWeek, parseDuration, fmtDuration, fmtPace, esc,
+  renderHome, renderMuscu, renderSession, renderExercisePage, renderProgress, renderExerciseDetail, renderSettings, renderSheet, renderNav, renderBanners, renderRest,
+  sessionModel, parseDuration, fmtDuration, fmtPace, esc,
 } from './screens.js';
 import { createWorkout, afterSet, fallbackOffer, restLeft, newId, slotSets, suggestionFor } from './workout.js';
 import { loadMode } from './suggest.js';
@@ -16,7 +16,7 @@ import { mountAnimations } from './anim.js';
 
 const $ = (sel) => document.querySelector(sel);
 const state = {
-  tab: 'program',
+  tab: 'home',
   today: todayLocal(),
   appVersion: APP_VERSION,
   sw: { supported: 'serviceWorker' in navigator, updateReady: false, checking: false, offline: null },
@@ -24,20 +24,22 @@ const state = {
   isIOS: /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1),
   workouts: [], sets: [], entries: [], settings: {},
   active: null, draftWorkout: null, edits: {}, fallback: null, menu: null,
-  sheet: null, viewWeek: null, selDate: null, pickSession: null, progressTab: 'lift', exerciseId: null,
+  sheet: null, exKey: null, progressTab: 'lift', exerciseId: null,
   lastBackup: null, hasSafetyCopy: false, restore: null, backupMsg: null, toast: null,
 };
 let registration = null;
 let updateRequested = false;
 const nowIso = () => new Date().toISOString();
-const VIEWS = { program: renderProgram, session: renderSession, progress: renderProgress, exercise: renderExerciseDetail };
+const VIEWS = { home: renderHome, muscu: renderMuscu, session: renderSession, exercise: renderExercisePage, progress: renderProgress, exdetail: renderExerciseDetail, settings: renderSettings };
+const NAV_OF = { home: 'home', muscu: 'home', session: 'home', exercise: 'home', progress: 'progress', exdetail: 'progress', settings: 'settings' };
+const inWorkout = () => state.tab === 'session' || state.tab === 'exercise';
 
 function render() {
-  if (state.tab === 'session' && !state.active && !state.draftWorkout) state.tab = 'program';
+  if (inWorkout() && !state.active && !state.draftWorkout) state.tab = 'muscu';
   const y = window.scrollY;
   $('#main').innerHTML = VIEWS[state.tab](state);
   $('#sheet').innerHTML = renderSheet(state);
-  $('#nav').innerHTML = renderNav(state.tab === 'exercise' ? 'progress' : state.tab);
+  $('#nav').innerHTML = renderNav(NAV_OF[state.tab]);
   $('#banners').innerHTML = renderBanners(state);
   document.body.dataset.tab = state.tab;
   document.body.classList.toggle('has-sheet', !!state.sheet);
@@ -49,6 +51,7 @@ function render() {
 }
 
 function go(tab) {
+  if (tab === 'settings' && state.tab !== 'settings') { state.backupMsg = null; state.startMsg = null; }
   state.tab = tab;
   state.sheet = null;
   state.menu = null;
@@ -242,7 +245,7 @@ async function saveWorkout(status) {
   state.edits = {};
   state.fallback = null;
   toast(status === 'done' ? 'Séance enregistrée.' : 'Séance abandonnée.');
-  go('program');
+  go('home');
 }
 
 let flashTimer = null;
@@ -309,10 +312,39 @@ async function saveEndurance(form) {
   await putRecord('entries', entry);
   state.entries = state.entries.filter((e) => e.id !== entry.id).concat(entry);
   state.sheet = null;
-  if (state.tab === 'program') { state.selDate = entry.date; state.pickSession = null; }
   toast(run ? 'Course enregistrée.' : 'Natation enregistrée.');
   render();
   return null;
+}
+
+async function saveWeight(form) {
+  const fd = new FormData(form);
+  const kg = toNum(fd.get('kg'));
+  const waist = toNum(fd.get('waist'));
+  const date = String(fd.get('date') || state.today);
+  const err = (t) => { state.sheet.error = t; render(); };
+  if (kg === null || !Number.isFinite(kg) || kg < 30 || kg > 300) return err('Indique ton poids (entre 30 et 300 kg).');
+  if (waist !== null && (!Number.isFinite(waist) || waist < 40 || waist > 200)) return err('Tour de taille invalide.');
+  if (date > state.today) return err('La date ne peut pas être dans le futur.');
+  const now = nowIso();
+  const e = { id: newId('e'), kind: 'weight', date, kg: Math.round(kg * 10) / 10, createdAt: now, updatedAt: now };
+  if (waist !== null) e.waist = Math.round(waist * 10) / 10;
+  await putRecord('entries', e);
+  state.entries.push(e);
+  state.sheet = null;
+  toast('Pesée enregistrée.');
+  state.progressTab = 'weight';
+  go('progress');
+  return null;
+}
+
+async function changeSessionDate(value) {
+  if (!value || value > state.today) return;
+  const w = currentWorkout();
+  if (!w) return;
+  w.date = value;
+  await persistWorkout();
+  render();
 }
 
 // ---------- Chronomètre de repos ----------
@@ -349,7 +381,7 @@ function tick() {
   const w = state.active && state.active.workout;
   const el = $('#elapsed');
   if (el && w) el.textContent = `${Math.max(0, Math.floor((Date.now() - Date.parse(w.startedAt)) / 60000))} min`;
-  if (!w || state.tab !== 'session') return;
+  if (!w || !inWorkout()) return;
   const left = restLeft(w);
   if (left === null) return;
   const time = $('#rest-time');
@@ -370,7 +402,7 @@ setInterval(tick, 500);
 let wakeLock = null;
 async function updateWakeLock() {
   try {
-    if (state.tab === 'session' && document.visibilityState === 'visible' && 'wakeLock' in navigator) {
+    if (inWorkout() && document.visibilityState === 'visible' && 'wakeLock' in navigator) {
       if (!wakeLock) {
         wakeLock = await navigator.wakeLock.request('screen');
         wakeLock.addEventListener('release', () => { wakeLock = null; });
@@ -452,7 +484,6 @@ async function saveStart(result, okText) {
     await setMeta(START_KEY, result.override);
     state.startOverride = result.override;
     rebuildProgram();
-    state.viewWeek = null;
     state.startMsg = { ok: true, text: okText };
   }
   render();
@@ -462,18 +493,18 @@ async function saveStart(result, okText) {
 
 const ACTIONS = {
   go: (el) => go(el.dataset.tab),
-  week: (el) => {
-    const { totalWeeks, calWeek } = shownWeek(state);
-    state.viewWeek = Math.max(1, Math.min(totalWeeks, calWeek + Number(el.dataset.value)));
-    state.selDate = null;
-    state.pickSession = null;
+  'open-session': (el) => openSession(el.dataset.value),
+  resume: () => go('session'),
+  'close-session': () => { state.fallback = null; go('muscu'); },
+  'open-ex': (el) => { state.exKey = el.dataset.value; state.fallback = null; state.menu = null; go('exercise'); },
+  'back-to-session': () => { state.fallback = null; go('session'); },
+  'log-weight': () => openSheet({ type: 'weight' }),
+  'delete-entry': async (el) => {
+    if (!window.confirm('Supprimer cette pesée ?')) return;
+    await deleteRecord('entries', el.dataset.id);
+    state.entries = state.entries.filter((e) => e.id !== el.dataset.id);
     render();
   },
-  'pick-day': (el) => { state.selDate = el.dataset.value; state.pickSession = null; render(); },
-  'pick-session': (el) => { state.pickSession = el.dataset.value; render(); },
-  'open-session': (el) => openSession(el.dataset.value, el.dataset.date),
-  resume: () => go('session'),
-  'close-session': () => { state.fallback = null; go('program'); },
   'show-demo': (el) => openSheet({ type: 'demo', id: el.dataset.value }),
   'ex-menu': (el) => { state.menu = state.menu === el.dataset.value ? null : el.dataset.value; render(); },
   swap: (el) => swapExercise(el.dataset.slot, el.dataset.value, 'alternative'),
@@ -546,8 +577,8 @@ const ACTIONS = {
     render();
   },
   'progress-tab': (el) => { state.progressTab = el.dataset.value; render(); },
-  'open-exercise': (el) => { state.exerciseId = el.dataset.value; go('exercise'); },
-  settings: () => { state.backupMsg = null; state.startMsg = null; openSheet({ type: 'settings' }); },
+  'open-exercise': (el) => { state.exerciseId = el.dataset.value; go('exdetail'); },
+  settings: () => { state.backupMsg = null; state.startMsg = null; go('settings'); },
   'delete-workout': async (el) => {
     if (!window.confirm('Supprimer définitivement cette séance ?')) return;
     await deleteWorkout(el.dataset.id);
@@ -577,6 +608,7 @@ document.addEventListener('submit', (ev) => {
   if (!form) return;
   ev.preventDefault();
   if (form.dataset.form === 'start-date') saveStart(applyStartDateChange(state.startOverride, state.fileProgram, String(new FormData(form).get('start')), { today: state.today }), 'Date enregistrée.');
+  if (form.dataset.form === 'weight') saveWeight(form).catch((e) => { state.sheet.error = e.message; render(); });
   if (form.dataset.form === 'endurance') saveEndurance(form).catch((e) => { state.sheet.error = e.message; render(); });
 });
 
@@ -607,6 +639,7 @@ document.addEventListener('focusin', (ev) => {
 });
 
 document.addEventListener('change', async (ev) => {
+  if (ev.target.id === 'session-date') { await changeSessionDate(ev.target.value); return; }
   if (ev.target.id !== 'restore-input') return;
   const file = ev.target.files && ev.target.files[0];
   ev.target.value = '';
@@ -682,7 +715,7 @@ document.addEventListener('visibilitychange', () => {
   updateWakeLock();
   if (document.visibilityState !== 'visible') return;
   const now = todayLocal();
-  if (now !== state.today) { state.today = now; if (state.tab === 'program' && !state.sheet) render(); }
+  if (now !== state.today) { state.today = now; if (state.tab === 'home' && !state.sheet) render(); }
   tick();
   checkForUpdate(false);
 });

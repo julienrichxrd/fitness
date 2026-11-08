@@ -3,7 +3,7 @@
 // la course, la natation, la démonstration d'un exercice et les réglages.
 import { resolveSession } from './program.js';
 import { cycleInfo, formatDateFr, addDays, toDayNumber } from './dates.js';
-import { workoutPlan, slotSets, suggestionFor, restLeft, setsOf } from './workout.js';
+import { workoutPlan, slotSets, suggestionFor, restLeft, setsOf, createWorkout } from './workout.js';
 import { fmtKg, loadMode, bestSet } from './suggest.js';
 import { hasAnimation, cueOf, viewOf, viewBoxOf } from './anim.js';
 import './moves.js';
@@ -13,7 +13,7 @@ const range = (r) => (r.min === r.max ? `${r.min}` : `${r.min}–${r.max}`);
 export const exName = (lib, id) => (lib.exercises.find((e) => e.id === id) || { name: id }).name;
 const shortName = (s) => s.name.replace(/^Séance [ABC] — /, '').replace(/, \w+$/, '');
 const clock = (sec) => `${Math.floor(sec / 60)}:${String(Math.round(sec % 60)).padStart(2, '0')}`;
-const restTxt = (sec) => (!sec ? '—' : sec % 60 ? clock(sec) : `${sec / 60} min`);
+const restTxt = (sec) => (!sec ? "—" : sec % 60 ? `${Math.floor(sec / 60)} min ${sec % 60}` : `${sec / 60} min`);
 const nf = (x, d = 1) => (x === null || x === undefined || !Number.isFinite(x) ? '—' : (Math.round(x * 10 ** d) / 10 ** d).toLocaleString('fr-FR', { maximumFractionDigits: d }));
 const DAYS = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
 const DAY_SHORT = ['L', 'M', 'M', 'J', 'V', 'S', 'D'];
@@ -71,101 +71,120 @@ export function demo(lib, id, cls = '') {
   return `<div class="demo ${cls} empty"></div>`;
 }
 
-// ---------- Programme de la semaine ----------
+// ---------- Accueil : « Qu'est-ce qu'on fait aujourd'hui ? » ----------
 
-/** Ce qui est prévu chaque jour de la semaine réelle calWeek. */
-export function weekPlan(state, calWeek) {
-  const { program } = state;
-  const start = addDays(program.startDate, (calWeek - 1) * 7);
-  const cal = (program.calendar || [])[calWeek - 1] || { week: calWeek };
-  return DAYS.map((day, i) => {
-    const date = addDays(start, i);
-    const entry = program.schedule.find((s) => s.day === day) || {};
-    let kind = 'rest';
-    let title = entry.reminder || 'Repos';
-    if (entry.session) { kind = 'lift'; title = `Séance ${entry.session}`; }
-    else if (day === 'saturday') { kind = 'run'; title = ((program.enduranceReminders || {}).saturday || {})[String(cal.week)] || 'Course facile'; }
-    else if (day === 'sunday') { kind = 'swim'; title = ((program.enduranceReminders || {}).sunday || {})[String(cal.week)] || 'Natation'; }
-    else if (/Mobilité/.test(title)) kind = 'mob';
-    const end = addDays(start, 6);
-    const done = kind === 'lift'
-      ? (state.workouts || []).some((w) => w.status === 'done' && w.sessionId === entry.session && w.date >= start && w.date <= end)
-      : (state.entries || []).some((e) => e.date === date && e.kind === { run: 'run', swim: 'swim', mob: 'mobility' }[kind]);
-    return { day, i, date, kind, title: title.replace(/^(Course|Natation) : /, ''), session: entry.session || null, done, week: cal.week, deload: !!cal.deload };
+/** Lundi de la semaine qui contient la date. */
+export function mondayOf(date) {
+  const d = new Date(`${date}T12:00:00Z`);
+  return addDays(date, -((d.getUTCDay() + 6) % 7));
+}
+
+export const sessionNumber = (program, sid) => program.sessionOrder.indexOf(sid) + 1;
+export const sessionTitle = (program, sid) => `Séance ${sessionNumber(program, sid)}`;
+export const sessionSub = (program, sid) => shortName(program.sessions.find((x) => x.id === sid));
+
+/** Ce qui a été fait pendant la semaine (lundi → dimanche) qui contient `date`. */
+export function weekSummary(state, date = state.today) {
+  const start = mondayOf(date);
+  const end = addDays(start, 6);
+  const inWeek = (d) => d >= start && d <= end;
+  const lifts = (state.workouts || []).filter((w) => w.status === 'done' && inWeek(w.date)).sort((x, y) => x.date.localeCompare(y.date));
+  const runs = (state.entries || []).filter((e) => e.kind === 'run' && inWeek(e.date));
+  const swims = (state.entries || []).filter((e) => e.kind === 'swim' && inWeek(e.date));
+  const doneIds = new Set(lifts.map((w) => w.sessionId));
+  const todo = state.program.sessionOrder.filter((id) => !doneIds.has(id));
+  const days = Array.from({ length: 7 }, (_, i) => {
+    const d = addDays(start, i);
+    const marks = [
+      ...lifts.filter((w) => w.date === d).map((w) => ({ kind: 'lift', label: String(sessionNumber(state.program, w.sessionId)) })),
+      ...runs.filter((e) => e.date === d).map(() => ({ kind: 'run', label: 'C' })),
+      ...swims.filter((e) => e.date === d).map(() => ({ kind: 'swim', label: 'N' })),
+    ];
+    return { date: d, i, marks };
   });
+  return { start, end, lifts, runs, swims, doneIds, todo, days };
 }
 
-const KIND_ICON = { lift: 'lift', run: 'run', swim: 'swim', mob: 'mob', rest: 'cal' };
+const KM = (m) => nf(m / 1000, 1);
 
-export function shownWeek(state) {
-  const info = cycleInfo(state.program, state.today);
-  const totalWeeks = (state.program.calendar || []).length || state.program.weeks;
-  const calWeek = state.viewWeek || (info.status === 'during' ? info.calWeek : info.status === 'before' ? 1 : totalWeeks);
-  return { info, totalWeeks, calWeek };
-}
-
-export function renderProgram(state) {
-  const { program, today, lib } = state;
-  const { info, totalWeeks, calWeek } = shownWeek(state);
-  const days = weekPlan(state, calWeek);
-  const sel = state.selDate && days.some((d) => d.date === state.selDate) ? state.selDate : (days.find((d) => d.date === today) || days[0]).date;
-  const d = days.find((x) => x.date === sel);
-  const rule = program.weekRules.find((r) => r.week === d.week);
-
-  const strip = days.map((x) => `<button class="day ${x.kind}${x.date === sel ? ' sel' : ''}${x.date === today ? ' today' : ''}${x.done ? ' done' : ''}" data-action="pick-day" data-value="${x.date}">
-      <span class="dl">${DAY_SHORT[x.i]}</span><span class="dn">${Number(x.date.slice(8))}</span><span class="di">${x.done ? icon('check') : x.kind === 'lift' ? esc(x.session) : x.kind === 'rest' ? '' : icon(KIND_ICON[x.kind])}</span>
-    </button>`).join('');
-
-  let card = '';
-  if (d.kind === 'lift' || state.pickSession) {
-    const sid = state.pickSession || d.session;
-    const s = program.sessions.find((x) => x.id === sid);
-    const res = resolveSession(program, sid, d.week, { deload: d.deload });
-    const sets = res.filter((x) => x.category !== 'explosive').reduce((n, x) => n + x.sets, 0);
-    const active = state.active && state.active.workout.sessionId === sid;
-    card = `
-      <section class="plan lift">
-        <div class="plan-head"><span class="badge lift">${esc(sid)}</span><div><h2>${esc(shortName(s))}</h2><p>${res.length} exercices · ${sets} séries · RIR ${esc(range(rule.rir.compound))}${d.deload ? ' · décharge' : ''}</p></div></div>
-        <ol class="plan-list">${res.map((x) => `<li><button class="plan-ex" data-action="show-demo" data-value="${esc(x.exercise)}">${demo(lib, x.exercise, 'mini')}<span class="pe-main"><b>${esc(exName(lib, x.exercise))}</b><span>${x.sets} × ${esc(range(x.reps))}${x.perSide ? ' /côté' : ''}${x.superset ? ' · supersérie' : ''}</span></span></button></li>`).join('')}</ol>
-        <button class="btn big" data-action="open-session" data-value="${esc(sid)}" data-date="${esc(d.date)}">${icon('play')} ${active ? 'Reprendre la séance' : d.done ? 'Refaire la séance' : 'Commencer la séance'}</button>
-        <div class="alt">${program.sessionOrder.map((id) => `<button class="chip${id === sid ? ' on' : ''}" data-action="pick-session" data-value="${esc(id)}">Séance ${esc(id)}</button>`).join('')}</div>
-      </section>`;
-  } else if (d.kind === 'run' || d.kind === 'swim') {
-    const kind = d.kind;
-    const logged = (state.entries || []).filter((e) => e.kind === kind && e.date === d.date);
-    card = `
-      <section class="plan ${kind}">
-        <div class="plan-head"><span class="badge ${kind}">${icon(kind)}</span><div><h2>${kind === 'run' ? 'Course' : 'Natation'}</h2><p>${esc(d.title)}</p></div></div>
-        ${logged.length ? logged.map((e) => enduranceRow(e)).join('') : `<p class="hint">${kind === 'run' ? 'Allure facile : vous pouvez parler en phrases complètes.' : 'Technique avant tout : expirez sous l\'eau, respirez sur le côté.'}</p>`}
-        <button class="btn big ${kind}" data-action="log-endurance" data-kind="${kind}" data-date="${esc(d.date)}" data-title="${esc(d.title)}">${icon('plus')} ${logged.length ? 'Ajouter une autre' : `Noter ${kind === 'run' ? 'ma course' : 'ma séance'}`}</button>
-      </section>`;
-  } else if (d.kind === 'mob') {
-    card = `
-      <section class="plan mob">
-        <div class="plan-head"><span class="badge mob">${icon('mob')}</span><div><h2>Mobilité</h2><p>${esc(d.title)}</p></div></div>
-        <button class="btn big ${d.done ? 'quiet' : 'mob'}" data-action="toggle-mobility" data-date="${esc(d.date)}">${d.done ? `${icon('check')} Faite` : 'Marquer comme faite'}</button>
-      </section>`;
-  } else {
-    card = `<section class="plan"><h2>Repos</h2></section>`;
-  }
-
-  const extra = (state.entries || []).filter((e) => e.date === d.date && (e.kind === 'run' || e.kind === 'swim') && !(e.kind === d.kind && !state.pickSession));
+export function renderHome(state) {
+  const { program, today } = state;
+  const wk = weekSummary(state);
+  const next = wk.todo[0];
+  const liftN = Math.min(3, wk.lifts.length);
+  const runM = wk.runs.reduce((n, e) => n + (e.distanceM || 0), 0);
+  const swimM = wk.swims.reduce((n, e) => n + (e.distanceM || 0), 0);
+  const recent = [
+    ...(state.workouts || []).filter((w) => w.status === 'done').map((w) => ({ kind: 'lift', date: w.date, at: w.endedAt || w.startedAt, w })),
+    ...(state.entries || []).filter((e) => e.kind === 'run' || e.kind === 'swim').map((e) => ({ kind: e.kind, date: e.date, at: e.createdAt || '', e })),
+  ].sort((x, y) => (y.date + y.at).localeCompare(x.date + x.at)).slice(0, 5);
+  const monthly = monthlyDue(state);
+  const short = (d) => formatDateFr(d, { weekday: true }).split(' ')[0].slice(0, 3) + '.';
   return `
-    <header class="top">
-      <div><p class="brand"><img src="./icon-192.png" alt="">JR Athletics</p><p class="kicker">${esc(info.status === 'before' ? `Début ${formatDateFr(program.startDate)}` : `${program.name}`)}</p>
-      <h1>Semaine ${calWeek}<small> / ${totalWeeks}</small></h1></div>
-      <div class="top-actions">
-        <button class="icon-btn" data-action="week" data-value="-1" aria-label="Semaine précédente"${calWeek <= 1 ? ' disabled' : ''}>${icon('back')}</button>
-        <button class="icon-btn flip" data-action="week" data-value="1" aria-label="Semaine suivante"${calWeek >= totalWeeks ? ' disabled' : ''}>${icon('back')}</button>
-        <button class="icon-btn" data-action="settings" aria-label="Réglages">${icon('gear')}</button>
-      </div>
-    </header>
+    <header class="top"><div><p class="brand"><img src="./icon-192.png" alt="">JR Athletics</p><h1>Qu'est-ce qu'on fait aujourd'hui ?</h1></div></header>
     ${state.toast ? `<div class="toast">${icon('check')}<span>${esc(state.toast)}</span></div>` : ''}
-    <nav class="strip" aria-label="Jours de la semaine">${strip}</nav>
-    <p class="day-title">${esc(formatDateFr(d.date))}${d.date === today ? ' · aujourd\'hui' : ''}</p>
-    ${state.active && !(d.kind === 'lift' && state.active.workout.sessionId === (state.pickSession || d.session)) ? `<button class="resume" data-action="resume">${icon('play')} Séance ${esc(state.active.workout.sessionId)} en cours : reprendre</button>` : ''}
-    ${card}
-    ${extra.length ? `<section class="extra"><p class="day-title">Aussi ce jour-là</p>${extra.map((e) => enduranceRow(e)).join('')}</section>` : ''}`;
+    ${state.active ? `<button class="resume" data-action="resume">${icon('play')} ${esc(sessionTitle(program, state.active.workout.sessionId))} en cours : reprendre</button>` : ''}
+    <section class="week" data-test="week">
+      <div class="wk-t"><span>Cette semaine</span><span>${esc(formatDateFr(wk.start, { weekday: false }))} → ${esc(formatDateFr(wk.end, { weekday: false }))}</span></div>
+      <div class="wk-goals">
+        <div class="wk-g lift"><b>${liftN}<small>/3</small></b><span>Muscu</span><span class="dots">${[0, 1, 2].map((i) => `<i${i < liftN ? ' class="on"' : ''}></i>`).join('')}</span></div>
+        <div class="wk-g run"><b>${wk.runs.length}</b><span>Course${wk.runs.length > 1 ? 's' : ''}${runM ? ` · ${KM(runM)} km` : ''}</span></div>
+        <div class="wk-g swim"><b>${wk.swims.length}</b><span>Natation${swimM ? ` · ${nf(swimM, 0)} m` : ''}</span></div>
+      </div>
+      <div class="wk-days">${wk.days.map((d) => `<div class="${d.date === today ? 'today' : ''}"><span>${DAY_SHORT[d.i]}</span><span class="wk-m">${d.marks.length ? d.marks.map((m) => `<u class="${m.kind}">${esc(m.label)}</u>`).join('') : '<u></u>'}</span></div>`).join('')}</div>
+    </section>
+    ${monthly ? `<button class="month" data-action="log-weight">${icon('chart')}<span><b>Point du mois</b><span>Note ton poids et ton tour de taille : l'appli te dit s'il faut ajuster tes calories.</span></span></button>` : ''}
+    <div class="choices">
+      <button class="choice lift" data-action="go" data-tab="muscu"><span class="ch-ic">${icon('lift')}</span><span><b>Muscu</b><span>${next ? `${wk.lifts.length}/3 cette semaine · conseillée : ${esc(sessionTitle(program, next))}` : '3/3 cette semaine : bravo. Séance bonus possible'}</span></span></button>
+      <button class="choice run" data-action="log-endurance" data-kind="run" data-date="${esc(today)}"><span class="ch-ic">${icon('run')}</span><span><b>Course</b><span>Distance et durée : l'allure se calcule</span></span></button>
+      <button class="choice swim" data-action="log-endurance" data-kind="swim" data-date="${esc(today)}"><span class="ch-ic">${icon('swim')}</span><span><b>Natation</b><span>Distance et durée : l'allure aux 100 m se calcule</span></span></button>
+    </div>
+    ${recent.length ? `<p class="sec-t">Derniers entraînements</p><div class="recent">${recent.map((r) => r.kind === 'lift'
+    ? `<div class="rc lift"><i></i><span><b>${esc(sessionTitle(program, r.w.sessionId))}</b> · ${esc(sessionSub(program, r.w.sessionId))}</span><em>${esc(short(r.date))}</em></div>`
+    : `<button class="rc ${r.kind}" data-action="edit-endurance" data-id="${esc(r.e.id)}"><i></i><span><b>${esc(r.e.title || (r.kind === 'run' ? 'Course' : 'Natation'))}</b> · ${r.kind === 'run' ? `${KM(r.e.distanceM || 0)} km` : `${nf(r.e.distanceM || 0, 0)} m`}${paceTxt(r.e) ? ` · ${paceTxt(r.e)}` : ''}</span><em>${esc(short(r.date))}</em></button>`).join('')}</div>` : ''}`;
+}
+
+const paceOfEntry = (e) => (e.distanceM && e.durationSec ? (e.kind === 'run' ? e.durationSec / (e.distanceM / 1000) : e.durationSec / (e.distanceM / 100)) : null);
+const paceTxt = (e) => { const p = paceOfEntry(e); return p ? `${fmtPace(p)}${e.kind === 'run' ? '/km' : '/100 m'}` : ''; };
+
+/** Le point du mois est dû si aucun poids n'a été noté depuis le 1er du mois en cours. */
+export function monthlyDue(state) {
+  const first = `${state.today.slice(0, 7)}-01`;
+  return !(state.entries || []).some((e) => e.kind === 'weight' && e.date >= first);
+}
+
+// ---------- Muscu : choisir une des 3 séances ----------
+
+export function renderMuscu(state) {
+  const { program, lib } = state;
+  const wk = weekSummary(state);
+  const rule = program.weekRules.find((r) => r.week === weekForToday(state)) || program.weekRules[0];
+  return `
+    <header class="sess-top"><button class="icon-btn" data-action="go" data-tab="home" aria-label="Retour">${icon('back')}</button><div class="st-title"><b>Muscu</b><span>${wk.lifts.length}/3 séances cette semaine</span></div><span></span></header>
+    <p class="lead">Choisis ta séance. L'ordre est libre : l'important, c'est de faire les trois dans la semaine.</p>
+    ${program.sessionOrder.map((sid) => {
+    const s = program.sessions.find((x) => x.id === sid);
+    const res = resolveSession(program, sid, weekForToday(state));
+    const sets = res.filter((x) => x.category !== 'explosive').reduce((n, x) => n + x.sets, 0);
+    const doneW = wk.lifts.filter((w) => w.sessionId === sid);
+    const active = state.active && state.active.workout.sessionId === sid;
+    const advised = !active && wk.todo[0] === sid;
+    return `<button class="sess-card${doneW.length ? ' done' : ''}${advised ? ' advised' : ''}" data-action="open-session" data-value="${esc(sid)}" data-test="session-${esc(sid)}">
+        <span class="sc-head"><span class="sc-num">${sessionNumber(program, sid)}</span><span class="sc-t"><b>${esc(sessionSub(program, sid))}</b><span>${res.length} exercices · ${sets} séries · ~${s.id === 'C' ? 65 : 60} min</span></span>
+        <span class="sc-st">${active ? '<em class="pill live">En cours</em>' : doneW.length ? `<em class="pill ok">${icon('check')} ${esc(formatDateFr(doneW[0].date, { weekday: true }).split(' ')[0])}</em>` : advised ? '<em class="pill adv">Conseillée</em>' : ''}</span></span>
+        <span class="sc-ex">${res.map((x) => `<span>${demo(lib, x.exercise, 'mini')}</span>`).join('')}</span>
+        <span class="sc-obj">${esc(s.objective)}</span>
+      </button>`;
+  }).join('')}
+    <p class="hint small">Semaine ${weekForToday(state)} du cycle : RIR ${esc(range(rule.rir.compound))} sur les gros exercices${rule.setDelta ? ', une série de moins par exercice' : ''}.</p>`;
+}
+
+function weekForToday(state) {
+  const info = cycleInfo(state.program, state.today);
+  const total = (state.program.calendar || []).length || state.program.weeks;
+  const cw = info.status === 'during' ? info.calWeek : info.status === 'before' ? 1 : total;
+  const cal = (state.program.calendar || [])[cw - 1];
+  return cal ? cal.week : cw;
 }
 
 function enduranceRow(e) {
@@ -207,31 +226,65 @@ export function rowValues(state, item, sug, history, done) {
   return rows;
 }
 
+/** Une ligne de la séance : un exercice, ou une supersérie (deux exercices liés). */
+export function sessionGroups(plan) {
+  const out = [];
+  for (const item of plan) {
+    if (item.superset) {
+      const g = out.find((x) => x.superset === item.superset);
+      if (g) { g.items.push(item); continue; }
+      out.push({ superset: item.superset, items: [item], key: item.slotId });
+    } else out.push({ superset: null, items: [item], key: item.slotId });
+  }
+  return out;
+}
+
 export function renderSession(state) {
   const { lib, program } = state;
   const { w, plan, sets } = sessionModel(state);
-  const s = program.sessions.find((x) => x.id === w.sessionId);
   const planned = plan.reduce((n, x) => n + x.sets, 0);
   const doneN = plan.reduce((n, x) => n + Math.min(x.sets, slotSets(sets, x.slotId).length), 0);
-  const cards = [];
-  for (let k = 0; k < plan.length; k += 1) {
-    const item = plan[k];
-    const group = item.superset ? plan.filter((x) => x.superset === item.superset) : null;
-    if (group && group[1].slotId === item.slotId) continue;
-    const members = group || [item];
-    const inner = members.map((it) => exerciseCard(state, it, sets, w)).join('');
-    cards.push(group ? `<div class="superset"><span class="ss-label">Supersérie : enchaînez les deux, puis repos ${esc(restTxt(group[0].restSec))}</span>${inner}</div>` : inner);
-  }
+  const rows = sessionGroups(plan).map((g) => {
+    const done = g.items.reduce((n, it) => n + Math.min(it.sets, slotSets(sets, it.slotId).length), 0);
+    const total = g.items.reduce((n, it) => n + it.sets, 0);
+    const st = done >= total ? 'ok' : done ? 'part' : '';
+    return `<button class="ex-row ${st}" data-action="open-ex" data-value="${esc(g.key)}" data-test="ex-row">
+      ${g.superset ? `<span class="ss-tag">Supersérie</span>` : ''}
+      ${g.items.map((it) => `<span class="er-line">${demo(lib, it.exercise, 'mini')}<span class="er-main"><b>${esc(exName(lib, it.exercise))}</b><span>${it.sets} × ${esc(range(it.reps))}${it.perSide ? ' /côté' : ''}</span></span></span>`).join('')}
+      <span class="er-st">${st === 'ok' ? icon('check') : `${done}/${total}`}</span>
+    </button>`;
+  }).join('');
   return `
     <header class="sess-top">
-      <button class="icon-btn" data-action="close-session" aria-label="Retour au programme">${icon('back')}</button>
-      <div class="st-title"><b>Séance ${esc(s.id)} · ${esc(shortName(s))}</b><span>${doneN}/${planned} séries · <span id="elapsed">${state.active ? '' : 'pas commencée'}</span></span></div>
+      <button class="icon-btn" data-action="close-session" aria-label="Retour">${icon('back')}</button>
+      <div class="st-title"><b>${esc(sessionTitle(program, w.sessionId))} · ${esc(sessionSub(program, w.sessionId))}</b><span>${doneN}/${planned} séries · <span id="elapsed">${state.active ? '' : 'pas commencée'}</span></span></div>
       <button class="btn small ${doneN ? '' : 'quiet'}" data-action="finish">Terminer</button>
     </header>
     <div class="bar"><span style="width:${Math.round((doneN / planned) * 100)}%"></span></div>
-    <p class="sess-hint">Touchez <span class="tick-demo">${icon('check')}</span> pour valider une série. Modifiez le poids ou les répétitions avant si besoin.</p>
-    ${cards.join('')}
+    <label class="date-chip">${icon('cal')}<span>${w.date === state.today ? 'Aujourd\'hui' : esc(formatDateFr(w.date))}</span><input type="date" id="session-date" value="${esc(w.date)}" max="${esc(state.today)}" aria-label="Date de la séance"></label>
+    <p class="sess-hint">Touche un exercice pour voir le mouvement et noter tes séries.</p>
+    <div class="ex-rows">${rows}</div>
     <button class="btn big" data-action="finish">Terminer la séance</button>
+    <div class="rest-dock" id="rest-dock">${state.active ? renderRest(state.active.workout) : ''}</div>`;
+}
+
+/** Page d'un exercice (ou d'une supersérie) : le mouvement en grand, l'objectif, le tableau des séries. */
+export function renderExercisePage(state) {
+  const { lib, program } = state;
+  const { w, plan, sets } = sessionModel(state);
+  const g = sessionGroups(plan).find((x) => x.key === state.exKey) || sessionGroups(plan)[0];
+  const allDone = g.items.every((it) => slotSets(sets, it.slotId).length >= it.sets);
+  const first = g.items[0];
+  const restRound = g.superset ? (program.sessions.find((s) => s.id === w.sessionId).supersets.find((x) => x.id === g.superset) || {}).restAfterRoundSec : null;
+  return `
+    <header class="sess-top">
+      <button class="icon-btn" data-action="back-to-session" aria-label="Retour à la séance">${icon('back')}</button>
+      <div class="st-title"><b>${g.superset ? 'Supersérie' : esc(exName(lib, first.exercise))}</b><span>${esc(sessionTitle(program, w.sessionId))} · ${esc(sessionSub(program, w.sessionId))}</span></div>
+      <span></span>
+    </header>
+    ${g.superset ? `<p class="ss-explain">Enchaîne <b>${esc(exName(lib, g.items[0].exercise))}</b> puis <b>${esc(exName(lib, g.items[1].exercise))}</b> sans repos, puis ${esc(restTxt(restRound))} de repos. Répète ${g.items[0].sets} fois.</p>` : ''}
+    ${g.items.map((it) => `${demo(lib, it.exercise, 'big')}${cueOf(it.exercise) ? `<p class="cue" data-test="cue">${esc(cueOf(it.exercise))}</p>` : ''}${exerciseCard(state, it, sets, w)}`).join('')}
+    <button class="btn big${allDone ? '' : ' quiet'}" data-action="back-to-session" data-test="back-to-session">${allDone ? `${icon('check')} Exercice terminé : retour à la séance` : 'Retour à la séance'}</button>
     <div class="rest-dock" id="rest-dock">${state.active ? renderRest(state.active.workout) : ''}</div>`;
 }
 
@@ -249,7 +302,6 @@ function exerciseCard(state, item, sets, w) {
   return `
     <article class="ex-card${complete ? ' complete' : ''}" id="ex-${esc(item.slotId)}">
       <div class="ex-head">
-        <button class="ex-thumb" data-action="show-demo" data-value="${esc(item.exercise)}" aria-label="Voir la démonstration">${demo(lib, item.exercise, 'thumb')}</button>
         <div class="ex-info">
           <h3>${esc(exName(lib, item.exercise))}</h3>
           <p>${item.sets} × ${esc(range(item.reps))}${item.perSide ? ' /côté' : ''}${item.rir ? ` · RIR ${esc(range(item.rir))}` : ''}${item.superset ? '' : ` · repos ${esc(restTxt(item.restSec))}`}</p>
@@ -258,10 +310,9 @@ function exerciseCard(state, item, sets, w) {
         <button class="icon-btn ghost" data-action="ex-menu" data-value="${esc(item.slotId)}" aria-label="Options">${icon('more')}</button>
       </div>
       ${state.menu === item.slotId ? `<div class="ex-menu">
-        <button data-action="show-demo" data-value="${esc(item.exercise)}">${icon('play')} Voir la démonstration</button>
         ${[item.planned, ...item.raw.alternatives].filter((id) => id !== item.exercise).map((id) => `<button data-action="swap" data-slot="${esc(item.slotId)}" data-value="${esc(id)}">${icon('swap')} ${esc(exName(lib, id))}${id === item.planned ? ' (prévu)' : ''}</button>`).join('')}
       </div>` : ''}
-      <div class="goal${up ? ' up' : ''}">${up ? icon('up') : ''}<span><b>${esc(suggestion.title)}</b>${last ? ` · dernière fois ${last.sets.map((x) => esc(`${x.loadKg ? `${fmtKg(x.loadKg)}×` : ''}${x.reps}`)).join(', ')}` : ''}</span></div>
+      <div class="goal${up ? ' up' : ''}" data-test="suggestion">${up ? icon('up') : ''}<span><b>${esc(suggestion.title)}</b>${last ? ` · dernière fois ${last.sets.map((x) => esc(`${x.loadKg ? `${fmtKg(x.loadKg)}×` : ''}${x.reps}`)).join(', ')}` : ''}</span></div>
       ${suggestion.options.length ? `<div class="opts">${suggestion.options.map((o, i) => `<button class="chip small" data-action="pick-option" data-slot="${esc(item.slotId)}" data-value="${i}">${esc(o.label)}</button>`).join('')}</div>` : ''}
       ${fb ? `<div class="fallback" data-test="fallback">Moins de ${fb.belowReps} répétitions : finir sur ${fb.exercises.map((id) => `<button class="chip small" data-action="accept-fallback" data-slot="${esc(item.slotId)}" data-value="${esc(id)}">${esc(exName(lib, id))}</button>`).join('')}<button class="chip small" data-action="refuse-fallback">Non</button></div>` : ''}
       <table class="sets">
@@ -328,16 +379,19 @@ export function exerciseHistory(state) {
 
 export function renderProgress(state) {
   const tab = state.progressTab || 'lift';
-  const seg = [['lift', 'Muscu'], ['run', 'Course'], ['swim', 'Natation']].map(([id, l]) => `<button class="chip${tab === id ? ' on' : ''}" data-action="progress-tab" data-value="${id}">${l}</button>`).join('');
+  const seg = [['lift', 'Muscu'], ['run', 'Course'], ['swim', 'Natation'], ['weight', 'Poids']].map(([id, l]) => `<button class="chip${tab === id ? ' on' : ''}" data-action="progress-tab" data-value="${id}">${l}</button>`).join('');
   let body = '';
-  if (tab === 'lift') {
+  if (tab === 'weight') {
+    body = renderWeight(state);
+  } else if (tab === 'lift') {
     const list = exerciseHistory(state).sort((a, b) => b.sessions.length - a.sessions.length);
-    body = list.length ? `<div class="prog-list">${list.map((r) => {
+    const ups = nextLoads(state);
+    body = (ups.length ? `<p class="sec-t">À la prochaine séance</p><div class="ups" data-test="next-loads">${ups.map((u) => `<div class="up-row${u.up ? ' up' : ''}"><span><b>${esc(exName(state.lib, u.exercise))}</b><span>${esc(sessionTitle(state.program, u.sid))}</span></span><em>${esc(u.text)}</em></div>`).join('')}</div><p class="sec-t">Tous les exercices</p>` : '') + (list.length ? `<div class="prog-list">${list.map((r) => {
       const f = r.sessions[0].best; const l = r.sessions[r.sessions.length - 1].best;
       const dKg = (l.loadKg || 0) - (f.loadKg || 0); const dR = l.reps - f.reps;
       const delta = r.sessions.length < 2 ? '' : dKg ? `${dKg > 0 ? '+' : ''}${fmtKg(dKg)} kg` : dR ? `${dR > 0 ? '+' : ''}${dR} rép.` : '=';
       return `<button class="prog-row" data-action="open-exercise" data-value="${esc(r.exercise)}">${demo(state.lib, r.exercise, 'mini')}<span class="pr-main"><b>${esc(exName(state.lib, r.exercise))}</b><span>${l.loadKg ? `${fmtKg(l.loadKg)} kg × ${l.reps}` : `${l.reps} rép.`} · ${r.sessions.length} séance${r.sessions.length > 1 ? 's' : ''}</span></span><span class="delta${dKg > 0 || (!dKg && dR > 0) ? ' up' : ''}">${esc(delta)}</span></button>`;
-    }).join('')}</div>` : '<p class="empty">Vos exercices apparaîtront ici après votre première séance.</p>';
+    }).join('')}</div>` : '<p class="empty">Tes exercices apparaîtront ici après ta première séance.</p>');
   } else {
     const kind = tab;
     const list = (state.entries || []).filter((e) => e.kind === kind).sort((a, b) => b.date.localeCompare(a.date));
@@ -351,12 +405,64 @@ export function renderProgress(state) {
         <div><b>${kind === 'run' ? nf(totalM / 1000, 1) : nf(totalM, 0)}</b><span>${kind === 'run' ? 'km au total' : 'm au total'}</span></div>
         <div><b>${fmtPace(best)}</b><span>meilleure allure ${kind === 'run' ? '/km' : '/100 m'}</span></div>
       </div>
-      ${pts.length >= 2 ? `<div class="card"><p class="card-t">Allure ${kind === 'run' ? 'au km' : 'aux 100 m'} <span>plus haut = plus rapide</span></p>${lineChart(pts, { fmt: (v) => fmtPace(v), invert: true, cls: kind })}</div>` : ''}
+      ${pts.length >= 2 ? `<div class="card"><p class="card-t">Allure ${kind === 'run' ? 'au km' : 'aux 100 m'} <span>plus haut = plus rapide</span></p>${kind === 'run' ? '<p class="hint small">Compare des sorties de même type : une sortie longue et facile est normalement plus lente.</p>' : ''}${lineChart(pts, { fmt: (v) => fmtPace(v), invert: true, cls: kind })}</div>` : ''}
       <button class="btn ${kind}" data-action="log-endurance" data-kind="${kind}" data-date="${esc(state.today)}" data-title="${kind === 'run' ? 'Course' : 'Natation'}">${icon('plus')} Noter ${kind === 'run' ? 'une course' : 'une séance de natation'}</button>
       ${list.length ? `<div class="end-list">${list.map((e) => `<p class="end-date">${esc(formatDateFr(e.date))}</p>${enduranceRow(e)}`).join('')}</div>` : '<p class="empty">Aucune séance notée pour l\'instant.</p>'}`;
   }
-  return `<header class="top"><div><p class="brand"><img src="./icon-192.png" alt="">JR Athletics</p><h1>Progrès</h1></div><div class="top-actions"><button class="icon-btn" data-action="settings" aria-label="Réglages">${icon('gear')}</button></div></header>
+  return `<header class="top"><div><p class="brand"><img src="./icon-192.png" alt="">JR Athletics</p><h1>Progrès</h1></div></header>
+    ${state.toast ? `<div class="toast">${icon('check')}<span>${esc(state.toast)}</span></div>` : ''}
     <div class="seg">${seg}</div>${body}`;
+}
+
+
+/** Pour chaque exercice déjà travaillé : ce que l'appli proposera à la prochaine séance. */
+export function nextLoads(state) {
+  const out = [];
+  const seen = new Set();
+  for (const sid of state.program.sessionOrder) {
+    const w = createWorkout(state.program, sid, { date: state.today });
+    for (const item of workoutPlan(state.program, w, (state.settings || {}).increments)) {
+      if (seen.has(item.exercise) || item.category === 'explosive') continue;
+      const { history, suggestion } = suggestionFor(item, state.workouts || [], state.sets || [], w);
+      if (!history.length) continue;
+      seen.add(item.exercise);
+      const up = suggestion.kind === 'increase' || suggestion.kind === 'choice';
+      const text = up && suggestion.load !== null && suggestion.load !== undefined
+        ? (loadMode(item, item.increment) === 'added' ? `lest ${fmtKg(suggestion.load)} kg` : `${fmtKg(suggestion.load)} kg`)
+        : up ? 'monter' : suggestion.kind === 'progress' || suggestion.kind === 'consolidate' ? '+1 rép.' : '=';
+      out.push({ exercise: item.exercise, sid, up, text, title: suggestion.title });
+    }
+  }
+  return out.sort((a, b) => Number(b.up) - Number(a.up));
+}
+
+/** Verdict du mois : comparer la moyenne des pesées du dernier mois à celle du mois d'avant. */
+export function weightVerdict(entries) {
+  const ws = entries.filter((e) => e.kind === 'weight').sort((a, b) => a.date.localeCompare(b.date));
+  if (ws.length < 2) return null;
+  const last = ws[ws.length - 1];
+  const prev = [...ws].reverse().find((e) => toDayNumber(last.date) - toDayNumber(e.date) >= 21);
+  if (!prev) return null;
+  const days = toDayNumber(last.date) - toDayNumber(prev.date);
+  const perMonth = ((last.kg - prev.kg) / days) * 30;
+  const waist = last.waist && prev.waist ? ((last.waist - prev.waist) / days) * 30 : null;
+  let advice; let tone;
+  if (perMonth < 0.5) { advice = 'Ajoute environ 150 kcal par jour (un fruit et un yaourt).'; tone = 'up'; }
+  else if (perMonth > 1.4 || (waist !== null && waist > 1.5)) { advice = 'Enlève environ 150 kcal par jour : tu prends trop vite.'; tone = 'down'; }
+  else { advice = 'Continue comme ça : le rythme est bon.'; tone = 'ok'; }
+  return { perMonth, waist, advice, tone, from: prev, to: last };
+}
+
+function renderWeight(state) {
+  const ws = (state.entries || []).filter((e) => e.kind === 'weight').sort((a, b) => b.date.localeCompare(a.date));
+  const v = weightVerdict(state.entries || []);
+  const pts = [...ws].reverse().map((e) => ({ x: toDayNumber(e.date), y: e.kg }));
+  return `
+    <p class="hint">Objectif : environ +0,8 kg par mois, sans que le tour de taille s'envole. Pèse-toi le matin à jeun.</p>
+    ${v ? `<div class="verdict ${v.tone}" data-test="verdict"><b>${esc(v.advice)}</b><span>${v.perMonth >= 0 ? '+' : ''}${nf(v.perMonth, 1)} kg par mois${v.waist !== null ? ` · taille ${v.waist >= 0 ? '+' : ''}${nf(v.waist, 1)} cm par mois` : ''}, depuis le ${esc(formatDateFr(v.from.date, { weekday: false }))}</span></div>` : ws.length ? '<p class="muted">Le verdict apparaît avec deux pesées espacées d\'au moins 3 semaines.</p>' : ''}
+    ${pts.length >= 2 ? `<div class="card"><p class="card-t">Poids (kg)</p>${lineChart(pts, { fmt: (x) => nf(x, 1) })}</div>` : ''}
+    <button class="btn" data-action="log-weight">${icon('plus')} Noter mon poids</button>
+    ${ws.length ? `<ul class="recap">${ws.map((e) => `<li><span>${esc(formatDateFr(e.date))}</span><span><b>${nf(e.kg, 1)} kg</b>${e.waist ? ` · ${nf(e.waist, 1)} cm` : ''} <button class="icon-btn ghost" data-action="delete-entry" data-id="${esc(e.id)}" aria-label="Supprimer">${icon('trash')}</button></span></li>`).join('')}</ul>` : '<p class="empty">Aucune pesée pour l\'instant.</p>'}`;
 }
 
 export function renderExerciseDetail(state) {
@@ -410,22 +516,32 @@ export function renderSheet(state) {
       ${sets.length ? '<button class="btn big" data-action="save-workout" data-test="save-workout">Enregistrer la séance</button>' : ''}
       <button class="btn quiet" data-action="close-sheet">Continuer la séance</button>
       ${state.active ? '<button class="btn ghost danger" data-action="abandon-workout">Abandonner sans enregistrer</button>' : ''}`;
-  } else if (sh.type === 'settings') {
-    body = renderSettings(state);
+  } else if (sh.type === 'weight') {
+    body = `<h2>Point poids</h2>
+      <form class="form" data-form="weight">
+        <label class="field"><span>Date</span><input type="date" name="date" value="${esc(state.today)}" max="${esc(state.today)}"></label>
+        <div class="trio duo">
+          <label class="field"><span>Poids (kg)</span><input name="kg" class="big-in" inputmode="decimal" placeholder="79,0" required></label>
+          <label class="field"><span>Tour de taille (cm)</span><input name="waist" class="big-in" inputmode="decimal" placeholder="82"></label>
+        </div>
+        <p class="hint small">Tour de taille : au niveau du nombril, ventre relâché, le matin.</p>
+        ${sh.error ? `<p class="err">${esc(sh.error)}</p>` : ''}
+        <button class="btn big" type="submit">Enregistrer</button>
+      </form>`;
   }
   return `<div class="sheet-back" data-action="close-sheet"></div><div class="sheet" role="dialog" aria-modal="true"><button class="icon-btn ghost sheet-x" data-action="close-sheet" aria-label="Fermer">${icon('close')}</button>${body}</div>`;
 }
 
 const stamp = (iso) => new Date(iso).toLocaleString('fr-FR', { day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' });
 
-function renderSettings(state) {
+export function renderSettings(state) {
   const { program, fileProgram, sw } = state;
   const r = state.restore;
   const changed = program.startDate !== fileProgram.startDate;
   const doneW = (state.workouts || []).filter((w) => w.status === 'done').sort((a, b) => b.date.localeCompare(a.date));
-  return `<h2>Réglages</h2>
+  return `<header class="top"><div><p class="brand"><img src="./icon-192.png" alt="">JR Athletics</p><h1>Réglages</h1></div></header>
     <section class="set-block"><h3>Sauvegarde</h3>
-      <p class="muted">Vos données sont sur cet iPhone. ${state.lastBackup ? `Dernière sauvegarde : ${esc(stamp(state.lastBackup.at))}.` : 'Aucune sauvegarde pour l\'instant.'}</p>
+      <p class="muted">Tes données sont sur cet appareil. ${state.lastBackup ? `Dernière sauvegarde : ${esc(stamp(state.lastBackup.at))}.` : 'Aucune sauvegarde pour l\'instant.'}</p>
       <button class="btn" data-action="backup">Sauvegarder</button>
       <label class="btn quiet">Restaurer un fichier<input type="file" id="restore-input" hidden></label>
       ${state.hasSafetyCopy ? '<button class="btn ghost" data-action="undo-restore">Annuler la dernière restauration</button>' : ''}
@@ -434,7 +550,7 @@ function renderSettings(state) {
       ${r && r.preview ? `<div class="confirm" data-test="restore-preview"><b>Remplacer vos données par ce fichier ?</b><span>${r.preview.workouts} séances, ${r.preview.sets} séries.</span>${r.lost ? `<span class="err-t">${r.lost} séance(s) de cet iPhone seront perdues.</span>` : ''}<button class="btn danger-btn" data-action="restore-confirm">Remplacer</button><button class="btn quiet" data-action="restore-cancel">Annuler</button></div>` : ''}
     </section>
     <section class="set-block"><h3>Séances enregistrées</h3>
-      ${doneW.length ? `<ul class="recap">${doneW.slice(0, 12).map((w) => `<li><span>${esc(formatDateFr(w.date))} · Séance ${esc(w.sessionId)}</span><button class="icon-btn ghost" data-action="delete-workout" data-id="${esc(w.id)}" aria-label="Supprimer">${icon('trash')}</button></li>`).join('')}</ul>` : '<p class="muted">Aucune.</p>'}
+      ${doneW.length ? `<ul class="recap">${doneW.slice(0, 12).map((w) => `<li><span>${esc(formatDateFr(w.date))} · ${esc(sessionTitle(program, w.sessionId))}</span><button class="icon-btn ghost" data-action="delete-workout" data-id="${esc(w.id)}" aria-label="Supprimer">${icon('trash')}</button></li>`).join('')}</ul>` : '<p class="muted">Aucune.</p>'}
     </section>
     <section class="set-block"><h3>Début du cycle</h3>
       <p class="muted"><b data-test="start-date">${esc(formatDateFr(program.startDate, { year: true }))}${changed ? ' (modifiée)' : ''}</b></p>
@@ -450,7 +566,7 @@ function renderSettings(state) {
 
 export function renderNav(tab) {
   const t = (id, label, ic) => `<button class="tab${tab === id ? ' on' : ''}" data-action="go" data-tab="${id}">${icon(ic)}<span>${label}</span></button>`;
-  return `${t('program', 'Programme', 'cal')}${t('progress', 'Progrès', 'chart')}`;
+  return `${t('home', 'Accueil', 'play')}${t('progress', 'Progrès', 'chart')}${t('settings', 'Réglages', 'gear')}`;
 }
 
 export function renderBanners(state) {
