@@ -1,2 +1,2 @@
 # fitness
-Polices : Barlow Condensed et Lora, sous licence SIL Open Font License.
+Police : Barlow Condensed, sous licence SIL Open Font License.

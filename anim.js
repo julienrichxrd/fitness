@@ -5,9 +5,9 @@ let MOVES = {};
 export function registerMoves(m) { MOVES = m; }
 
 export const C = {
-  skin: '#ecdcc8', skinFar: '#b9a58f', shirt: '#f2b84b', shirtFar: '#c48e2c', shorts: '#3d4855', shortsFar: '#2b333c',
+  skin: '#ecdcc8', skinFar: '#b9a58f', shirt: '#ff5a1f', shirtFar: '#c2410c', shorts: '#3d4855', shortsFar: '#2b333c',
   shoe: '#cfd6de', shoeFar: '#8d969f', hair: '#3a2f28', iron: '#7a8693', ironDark: '#505a65', steel: '#9aa6b2',
-  pad: '#3a4550', padDark: '#2c353f', frame: '#56616d', cable: '#c9d1d9', floor: '#2e3842', accent: '#f2b84b',
+  pad: '#3a4550', padDark: '#2c353f', frame: '#56616d', cable: '#c9d1d9', floor: '#2b2f35', accent: '#ff5a1f',
 };
 export const L = { T: 80, SH: 10, UA: 44, FA: 40, TH: 64, SN: 60, FOOT: 24, HEAD: 16 };
 

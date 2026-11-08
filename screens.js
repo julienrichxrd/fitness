@@ -61,6 +61,13 @@ const I = {
   swap: '<path d="M7 4L3 8l4 4"/><path d="M3 8h13a4 4 0 0 1 4 4"/><path d="M17 20l4-4-4-4"/><path d="M21 16H8a4 4 0 0 1-4-4"/>',
   trash: '<path d="M5 7h14M10 7V4h4v3M7 7l1 13h8l1-13"/>',
 };
+const MARK = '<svg class="mark" viewBox="0 0 64 40" aria-hidden="true"><text x="0" y="33" class="mk-t">JR</text><rect x="38" y="21" width="6" height="13" rx="1.5" class="mk-b"/><rect x="47" y="14" width="6" height="20" rx="1.5" class="mk-b"/><rect x="56" y="6" width="6" height="28" rx="1.5" class="mk-b dim"/></svg>';
+const BRAND = `<p class="brand">${MARK}<span>Performance</span></p>`;
+/** Anneau en 3 segments : les 3 séances de muscu de la semaine. */
+function ring(n) {
+  const seg = (i) => { const a0 = -90 + i * 120 + 6; const a1 = a0 + 108; const r = 26; const p = (a) => [32 + r * Math.cos((a * Math.PI) / 180), 32 + r * Math.sin((a * Math.PI) / 180)].map((v) => v.toFixed(2)).join(' '); return `<path d="M${p(a0)} A${r} ${r} 0 0 1 ${p(a1)}" class="${i < n ? 'on' : ''}"/>`; };
+  return `<svg class="ring" viewBox="0 0 64 64" aria-hidden="true">${[0, 1, 2].map(seg).join('')}<text x="32" y="38" text-anchor="middle">${n}/3</text></svg>`;
+}
 export const icon = (n) => `<svg class="ic" viewBox="0 0 24 24" aria-hidden="true">${I[n] || ''}</svg>`;
 
 /** Démonstration : animation dessinée si elle existe, sinon les deux photos qui s'enchaînent. */
@@ -121,13 +128,13 @@ export function renderHome(state) {
   const monthly = monthlyDue(state);
   const short = (d) => formatDateFr(d, { weekday: true }).split(' ')[0].slice(0, 3) + '.';
   return `
-    <header class="top"><div><p class="brand"><img src="./icon-192.png" alt="">JR Athletics</p><h1>Qu'est-ce qu'on fait aujourd'hui ?</h1></div></header>
+    <header class="top"><div>${BRAND}<h1>Qu'est-ce qu'on fait aujourd'hui ?</h1></div></header>
     ${state.toast ? `<div class="toast">${icon('check')}<span>${esc(state.toast)}</span></div>` : ''}
     ${state.active ? `<button class="resume" data-action="resume">${icon('play')} ${esc(sessionTitle(program, state.active.workout.sessionId))} en cours : reprendre</button>` : ''}
     <section class="week" data-test="week">
       <div class="wk-t"><span>Cette semaine</span><span>${esc(formatDateFr(wk.start, { weekday: false }))} → ${esc(formatDateFr(wk.end, { weekday: false }))}</span></div>
       <div class="wk-goals">
-        <div class="wk-g lift"><b>${liftN}<small>/3</small></b><span>Muscu</span><span class="dots">${[0, 1, 2].map((i) => `<i${i < liftN ? ' class="on"' : ''}></i>`).join('')}</span></div>
+        <div class="wk-g lift">${ring(liftN)}<span>Muscu</span></div>
         <div class="wk-g run"><b>${wk.runs.length}</b><span>Course${wk.runs.length > 1 ? 's' : ''}${runM ? ` · ${KM(runM)} km` : ''}</span></div>
         <div class="wk-g swim"><b>${wk.swims.length}</b><span>Natation${swimM ? ` · ${nf(swimM, 0)} m` : ''}</span></div>
       </div>
@@ -409,7 +416,7 @@ export function renderProgress(state) {
       <button class="btn ${kind}" data-action="log-endurance" data-kind="${kind}" data-date="${esc(state.today)}" data-title="${kind === 'run' ? 'Course' : 'Natation'}">${icon('plus')} Noter ${kind === 'run' ? 'une course' : 'une séance de natation'}</button>
       ${list.length ? `<div class="end-list">${list.map((e) => `<p class="end-date">${esc(formatDateFr(e.date))}</p>${enduranceRow(e)}`).join('')}</div>` : '<p class="empty">Aucune séance notée pour l\'instant.</p>'}`;
   }
-  return `<header class="top"><div><p class="brand"><img src="./icon-192.png" alt="">JR Athletics</p><h1>Progrès</h1></div></header>
+  return `<header class="top"><div>${BRAND}<h1>Progrès</h1></div></header>
     ${state.toast ? `<div class="toast">${icon('check')}<span>${esc(state.toast)}</span></div>` : ''}
     <div class="seg">${seg}</div>${body}`;
 }
@@ -539,7 +546,7 @@ export function renderSettings(state) {
   const r = state.restore;
   const changed = program.startDate !== fileProgram.startDate;
   const doneW = (state.workouts || []).filter((w) => w.status === 'done').sort((a, b) => b.date.localeCompare(a.date));
-  return `<header class="top"><div><p class="brand"><img src="./icon-192.png" alt="">JR Athletics</p><h1>Réglages</h1></div></header>
+  return `<header class="top"><div>${BRAND}<h1>Réglages</h1></div></header>
     <section class="set-block"><h3>Sauvegarde</h3>
       <p class="muted">Tes données sont sur cet appareil. ${state.lastBackup ? `Dernière sauvegarde : ${esc(stamp(state.lastBackup.at))}.` : 'Aucune sauvegarde pour l\'instant.'}</p>
       <button class="btn" data-action="backup">Sauvegarder</button>
